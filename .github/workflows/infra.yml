@@ -1,0 +1,71 @@
+name: Infrastructure (Terraform)
+
+# Manual on purpose, this touches real GPU-instance money. This first
+# version only stands the hardware up and tears it down again, no
+# Ansible or Kubernetes yet, so a spot-capacity or AMI problem shows
+# up on its own before it's tangled up with k3s or Helm issues too.
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "What do you want to do with the AWS infrastructure?"
+        required: true
+        type: choice
+        options:
+          - apply
+          - destroy
+
+# Needed so this workflow can request a short-lived OIDC token from
+# GitHub and hand it to AWS instead of using a stored access key.
+permissions:
+  id-token: write
+  contents: read
+
+# A safety net so two runs of this can't step on each other's feet if
+# it gets triggered twice by accident.
+concurrency:
+  group: infra
+  cancel-in-progress: false
+
+jobs:
+  infra:
+    runs-on: ubuntu-latest
+    environment: aws-infra
+    defaults:
+      run:
+        working-directory: terraform
+
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.15.8"
+
+      - name: Get temporary AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::578254188866:role/github-actions-ai-model-serving-role
+          aws-region: us-east-1
+
+      - name: Write out the SSH public key so Terraform can import it
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ vars.SSH_PUBLIC_KEY }}" > ~/.ssh/ai-model-serving-key.pub
+
+      - name: Terraform init
+        run: terraform init
+
+      - name: Terraform apply
+        if: inputs.action == 'apply'
+        run: terraform apply -auto-approve -var="my_ip=${{ vars.MY_IP }}"
+
+      - name: Show the server's public IP
+        if: inputs.action == 'apply'
+        run: terraform output -raw server_public_ip
+
+      - name: Terraform destroy
+        if: inputs.action == 'destroy'
+        run: terraform destroy -auto-approve -var="my_ip=${{ vars.MY_IP }}"
