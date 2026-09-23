@@ -1,6 +1,5 @@
 # The VPC the GPU instance lives in. Same 10.0.0.0/16 range as
-# devops-cicd-pipeline, since there's no reason to deviate from the
-# conventional starting range for a single-instance setup like this.
+# devops-cicd-pipeline, no reason to deviate for a single-instance setup.
 resource "aws_vpc" "main" {
   cidr_block           = "10.0.0.0/16"
   enable_dns_support   = true
@@ -11,8 +10,8 @@ resource "aws_vpc" "main" {
   }
 }
 
-# A slice of the VPC above, made public by the route to the internet
-# gateway defined below.
+# A public slice of the VPC, made reachable from the internet by the
+# route table association below.
 resource "aws_subnet" "public" {
   vpc_id                  = aws_vpc.main.id
   cidr_block              = "10.0.1.0/24"
@@ -24,10 +23,8 @@ resource "aws_subnet" "public" {
   }
 }
 
-# The actual door between this VPC and the internet. Without it the
-# instance could exist internally but nothing outside AWS could reach
-# it, and it couldn't reach out to pull the model or the container
-# image either.
+# The door between this VPC and the internet. Without it the instance
+# can't be reached, and it can't reach out to pull images or weights.
 resource "aws_internet_gateway" "main" {
   vpc_id = aws_vpc.main.id
 
@@ -36,8 +33,7 @@ resource "aws_internet_gateway" "main" {
   }
 }
 
-# Route table: anything leaving the VPC (0.0.0.0/0) goes out through
-# the internet gateway.
+# Sends anything leaving the VPC (0.0.0.0/0) out through the internet gateway.
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.main.id
 
@@ -51,8 +47,7 @@ resource "aws_route_table" "public" {
   }
 }
 
-# Attaches the route table above to the subnet, so the rule actually
-# applies to something.
+# Attaches the route table above to the subnet, so the rule actually applies to something.
 resource "aws_route_table_association" "public" {
   subnet_id      = aws_subnet.public.id
   route_table_id = aws_route_table.public.id

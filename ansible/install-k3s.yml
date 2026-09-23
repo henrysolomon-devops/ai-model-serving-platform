@@ -1,0 +1,83 @@
+---
+# Installs k3s on the GPU instance Terraform just created, then makes
+# its 4 GPUs visible to Kubernetes via the NVIDIA device plugin, so
+# vLLM can request a GPU once it's deployed later.
+
+- name: Install k3s and expose the GPUs to Kubernetes
+  hosts: all
+  become: true
+  gather_facts: false
+
+  tasks:
+    # A freshly launched EC2 instance answers SSH before it's fully
+    # booted. Keep retrying until the connection holds steady, instead
+    # of moving on after one lucky handshake that might drop right after.
+    - name: Wait until SSH is reliably reachable, not just reachable once
+      wait_for_connection:
+        delay: 10
+        timeout: 180
+
+    - name: Now that the connection is stable, gather facts
+      setup:
+
+    - name: Update the apt package cache
+      apt:
+        update_cache: true
+        # Waits out cloud-init's own first-boot apt activity, instead of
+        # racing it and hitting a lock error.
+        lock_timeout: 180
+
+    # --tls-san: lets the API server accept connections using the
+    # server's public IP. --service-node-port-range: narrows the allowed
+    # NodePort range down to cover this project's ports (8001-8012).
+    # --disable traefik: not needed since KServe takes over routing later.
+    - name: Download and run the official k3s install script
+      shell: curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--tls-san {{ tls_san }} --kube-apiserver-arg=service-node-port-range=8001-8012 --disable traefik" sh -
+      args:
+        creates: /usr/local/bin/k3s
+
+    - name: Wait for the k3s service to be active
+      systemd:
+        name: k3s
+        state: started
+        enabled: true
+
+    - name: Wait until the node reports Ready
+      shell: k3s kubectl get nodes
+      register: node_status
+      until: "'Ready' in node_status.stdout"
+      retries: 10
+      delay: 5
+
+    - name: Show the node status
+      debug:
+        var: node_status.stdout_lines
+
+    # The standard NVIDIA device plugin, not the GPU Operator (see
+    # PROJECT_PLAN). With one GPU per environment and no time-slicing,
+    # this DaemonSet alone is enough for Kubernetes to see all 4 GPUs.
+    - name: Apply the NVIDIA device plugin
+      shell: >
+        k3s kubectl apply -f
+        https://raw.githubusercontent.com/NVIDIA/k8s-device-plugin/v0.20.0/deployments/static/nvidia-device-plugin.yml
+
+    - name: Wait for the device plugin's DaemonSet to be ready
+      shell: k3s kubectl get daemonset nvidia-device-plugin-daemonset -n kube-system -o jsonpath='{.status.numberReady}'
+      register: plugin_ready
+      until: plugin_ready.stdout == "1"
+      retries: 20
+      delay: 10
+
+    # The real proof this worked: if the node doesn't report
+    # nvidia.com/gpu: 4 here, nothing that requests a GPU later will
+    # ever get scheduled.
+    - name: Confirm the node reports all 4 GPUs
+      shell: k3s kubectl get node -o jsonpath='{.items[0].status.allocatable.nvidia\.com/gpu}'
+      register: gpu_count
+      until: gpu_count.stdout == "4"
+      retries: 15
+      delay: 10
+
+    - name: Show the GPU count Kubernetes actually sees
+      debug:
+        msg: "Node reports {{ gpu_count.stdout }} allocatable GPU(s)"

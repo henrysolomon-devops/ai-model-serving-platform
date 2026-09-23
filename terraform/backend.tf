@@ -1,5 +1,4 @@
-# State lives in its own S3 bucket, separate from devops-cicd-pipeline's,
-# so the two projects never share a state file or step on each other.
+# State lives in its own S3 bucket.
 terraform {
   backend "s3" {
     bucket = "ai-model-serving-platform-tfstate"
