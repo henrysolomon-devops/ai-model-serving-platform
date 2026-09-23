@@ -1,9 +1,8 @@
-name: Infrastructure (Terraform)
+name: Infrastructure (Terraform + Ansible)
 
-# Manual on purpose, this touches real GPU-instance money. This first
-# version only stands the hardware up and tears it down again, no
-# Ansible or Kubernetes yet, so a spot-capacity or AMI problem shows
-# up on its own before it's tangled up with k3s or Helm issues too.
+# Manual on purpose, this touches real GPU-instance money. Pick apply
+# to bring the server up (Terraform, then k3s and the NVIDIA device
+# plugin via Ansible), or destroy to tear everything down again.
 on:
   workflow_dispatch:
     inputs:
@@ -44,24 +43,17 @@ jobs:
         with:
           terraform_version: "1.15.8"
 
-      # Temporary, remove once the role assumption works. Prints the
-      # exact sub/aud claims GitHub is sending, so they can be
-      # compared byte-for-byte against the trust policy instead of
-      # guessing from a screenshot.
-      - name: Debug - print the OIDC token's actual claims
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const token = await core.getIDToken('sts.amazonaws.com');
-            const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
-            console.log('sub: [' + payload.sub + ']');
-            console.log('aud: [' + payload.aud + ']');
-
       - name: Get temporary AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::578254188866:role/github-actions-ai-model-serving-role
           aws-region: us-east-1
+
+      - name: Install Ansible
+        if: inputs.action == 'apply'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ansible
 
       - name: Write out the SSH public key so Terraform can import it
         run: |
@@ -71,13 +63,83 @@ jobs:
       - name: Terraform init
         run: terraform init
 
+      # ---------- apply path ----------
+
       - name: Terraform apply
         if: inputs.action == 'apply'
         run: terraform apply -auto-approve -var="my_ip=${{ vars.MY_IP }}"
 
-      - name: Show the server's public IP
+      - name: Get the server's public IP
         if: inputs.action == 'apply'
-        run: terraform output -raw server_public_ip
+        id: server_ip
+        run: echo "ip=$(terraform output -raw server_public_ip)" >> "$GITHUB_OUTPUT"
+
+      - name: Look up the security group this run needs to touch
+        if: inputs.action == 'apply'
+        id: sg
+        run: echo "id=$(terraform output -raw security_group_id)" >> "$GITHUB_OUTPUT"
+
+      - name: Figure out this runner's own public IP
+        if: inputs.action == 'apply'
+        id: runner_ip
+        run: echo "cidr=$(curl -s ifconfig.me)/32" >> "$GITHUB_OUTPUT"
+
+      - name: Temporarily let this runner SSH in, just long enough for Ansible
+        if: inputs.action == 'apply'
+        run: |
+          aws ec2 authorize-security-group-ingress \
+            --group-id ${{ steps.sg.outputs.id }} \
+            --protocol tcp --port 22 \
+            --cidr ${{ steps.runner_ip.outputs.cidr }}
+
+      - name: Temporarily let this runner reach the k3s API too
+        if: inputs.action == 'apply'
+        run: |
+          aws ec2 authorize-security-group-ingress \
+            --group-id ${{ steps.sg.outputs.id }} \
+            --protocol tcp --port 6443 \
+            --cidr ${{ steps.runner_ip.outputs.cidr }}
+
+      - name: Write out the SSH private key so Ansible can use it
+        if: inputs.action == 'apply'
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/ai-model-serving-key
+          chmod 600 ~/.ssh/ai-model-serving-key
+
+      - name: Run the Ansible playbook to install k3s and the NVIDIA device plugin
+        if: inputs.action == 'apply'
+        working-directory: ansible
+        run: ./deploy-k3s.sh "${{ steps.server_ip.outputs.ip }}"
+
+      - name: Create the staging and production namespaces
+        if: inputs.action == 'apply'
+        run: |
+          export KUBECONFIG=~/.kube/ai-model-serving-config
+          kubectl create namespace staging --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create namespace production --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Save the freshly generated kubeconfig as a repo secret
+        if: inputs.action == 'apply'
+        env:
+          GH_TOKEN: ${{ secrets.ADMIN_PAT }}
+        run: |
+          KUBECONFIG_B64=$(base64 -w 0 ~/.kube/ai-model-serving-config)
+          gh secret set KUBECONFIG_B64 --body "$KUBECONFIG_B64"
+
+      - name: Take the temporary SSH and API access back out
+        if: always() && inputs.action == 'apply'
+        run: |
+          aws ec2 revoke-security-group-ingress \
+            --group-id ${{ steps.sg.outputs.id }} \
+            --protocol tcp --port 22 \
+            --cidr ${{ steps.runner_ip.outputs.cidr }} || true
+          aws ec2 revoke-security-group-ingress \
+            --group-id ${{ steps.sg.outputs.id }} \
+            --protocol tcp --port 6443 \
+            --cidr ${{ steps.runner_ip.outputs.cidr }} || true
+
+      # ---------- destroy path ----------
 
       - name: Terraform destroy
         if: inputs.action == 'destroy'

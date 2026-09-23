@@ -11,9 +11,6 @@ resource "aws_security_group" "server" {
     cidr_blocks = [var.my_ip]
   }
 
-  # The Flask chat UI for each environment. 8001 = staging, 8002 =
-  # production. Always open for me so I can check the UI in a browser
-  # without waiting for a workflow run to open a port first.
   ingress {
     description = "Chat UI app ports (staging/production), always reachable from my own machine"
     from_port   = 8001
@@ -22,10 +19,8 @@ resource "aws_security_group" "server" {
     cidr_blocks = [var.my_ip]
   }
 
-  # The vLLM model API itself, one port per environment. 8011 =
-  # staging, 8012 = production. Kept separate from the chat UI ports
-  # so the model endpoint and the proxy in front of it can be reached
-  # (or firewalled) independently.
+  # Kept separate from the chat UI ports so the model endpoint can be
+  # firewalled independently later if needed.
   ingress {
     description = "Model API ports (staging/production), always reachable from my own machine"
     from_port   = 8011
@@ -41,10 +36,6 @@ resource "aws_security_group" "server" {
     protocol    = "tcp"
     cidr_blocks = [var.my_ip]
   }
-
-  # No permanent ingress rules here for GitHub's runners. Those open
-  # and close dynamically per workflow run via the AWS CLI, the same
-  # pattern devops-cicd-pipeline uses in infra.yml and deploy.yml.
 
   egress {
     from_port   = 0
