@@ -44,6 +44,19 @@ jobs:
         with:
           terraform_version: "1.15.8"
 
+      # Temporary, remove once the role assumption works. Prints the
+      # exact sub/aud claims GitHub is sending, so they can be
+      # compared byte-for-byte against the trust policy instead of
+      # guessing from a screenshot.
+      - name: Debug - print the OIDC token's actual claims
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const token = await core.getIDToken('sts.amazonaws.com');
+            const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+            console.log('sub: [' + payload.sub + ']');
+            console.log('aud: [' + payload.aud + ']');
+
       - name: Get temporary AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
