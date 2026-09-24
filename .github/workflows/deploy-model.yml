@@ -1,0 +1,124 @@
+name: Build and Deploy Model Service
+
+# Manual for now, no CI/CD yet (that's v2). Picks one environment
+# per run so promotion stays a deliberate, human decision.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Which environment to deploy to?"
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+
+env:
+  MODEL_IMAGE: ghcr.io/henrysolomon-devops/ai-model-serving-platform-model
+  CHATUI_IMAGE: ghcr.io/henrysolomon-devops/ai-model-serving-platform-chat-ui
+
+jobs:
+  build:
+    # Builds and pushes both images only, doesn't touch Kubernetes,
+    # so build and deploy problems stay easy to tell apart.
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      image_tag: ${{ github.sha }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push the model service image
+        run: |
+          docker build -t $MODEL_IMAGE:${{ github.sha }} -f model-service/Dockerfile model-service
+          docker push $MODEL_IMAGE:${{ github.sha }}
+
+      - name: Build and push the chat UI image
+        run: |
+          docker build -t $CHATUI_IMAGE:${{ github.sha }} -f chat-ui/Dockerfile chat-ui
+          docker push $CHATUI_IMAGE:${{ github.sha }}
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure kubectl for the remote k3s server
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG_B64 }}" | base64 -d > ~/.kube/config
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Get temporary AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::578254188866:role/github-actions-ai-model-serving-role
+          aws-region: us-east-1
+
+      - name: Look up the security group by name
+        id: sg
+        run: |
+          echo "id=$(aws ec2 describe-security-groups \
+            --filters Name=group-name,Values=ai-model-serving-sg \
+            --query 'SecurityGroups[0].GroupId' --output text)" >> "$GITHUB_OUTPUT"
+
+      - name: Figure out this runner's own public IP
+        id: runner_ip
+        run: echo "cidr=$(curl -s ifconfig.me)/32" >> "$GITHUB_OUTPUT"
+
+      - name: Temporarily let this runner reach the k3s API
+        run: |
+          aws ec2 authorize-security-group-ingress \
+            --group-id ${{ steps.sg.outputs.id }} \
+            --protocol tcp --port 6443 \
+            --cidr ${{ steps.runner_ip.outputs.cidr }}
+
+      # Created directly with kubectl, not through Helm, so the actual
+      # values never end up in a values file or in git.
+      - name: Create the hf-token and api-key secrets
+        run: |
+          kubectl create secret generic hf-token \
+            --from-literal=HF_TOKEN=${{ secrets.HF_TOKEN }} \
+            -n ${{ inputs.environment }} --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create secret generic api-key \
+            --from-literal=API_KEY=${{ secrets.API_KEY }} \
+            -n ${{ inputs.environment }} --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Deploy with Helm
+        run: |
+          helm upgrade --install ai-model-serving helm/ai-model-serving \
+            -f helm/ai-model-serving/values-${{ inputs.environment }}.yaml \
+            --set model.image.tag=${{ needs.build.outputs.image_tag }} \
+            --set chatUI.image.tag=${{ needs.build.outputs.image_tag }} \
+            -n ${{ inputs.environment }}
+
+      - name: Close the temporary access back up
+        if: always()
+        run: |
+          aws ec2 revoke-security-group-ingress \
+            --group-id ${{ steps.sg.outputs.id }} \
+            --protocol tcp --port 6443 \
+            --cidr ${{ steps.runner_ip.outputs.cidr }} || true
