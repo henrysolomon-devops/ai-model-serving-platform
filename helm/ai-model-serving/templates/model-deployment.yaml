@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: model-service
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: model-service
+  template:
+    metadata:
+      labels:
+        app: model-service
+    spec:
+      containers:
+        - name: model-service
+          image: "{{ .Values.model.image.repository }}:{{ .Values.model.image.tag }}"
+          ports:
+            - containerPort: {{ .Values.model.port }}
+          env:
+            - name: WEIGHTS_BUCKET
+              value: {{ .Values.model.weightsBucket }}
+            # hf-token and api-key are created directly with kubectl by
+            # deploy-model.yml, not by this chart, so the actual secret
+            # values never need to appear in a values file or in git.
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hf-token
+                  key: HF_TOKEN
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: api-key
+                  key: API_KEY
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+            requests:
+              nvidia.com/gpu: 1
+          # A cold start can mean downloading ~6GB of weights from Hugging Face
+          # or S3, so this gets a generous window before Kubernetes gives up.
+          # Once /health responds, the tighter liveness/readiness checks take over.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.model.port }}
+            periodSeconds: 15
+            failureThreshold: 40
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.model.port }}
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.model.port }}
+            periodSeconds: 10

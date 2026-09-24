@@ -1,0 +1,5 @@
+apiVersion: v2
+name: ai-model-serving
+description: Deploys the vLLM model service and its chat UI proxy
+version: 0.1.0
+appVersion: "1.0"

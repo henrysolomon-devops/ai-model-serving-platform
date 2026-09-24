@@ -34,6 +34,10 @@ resource "aws_instance" "server" {
   vpc_security_group_ids = [aws_security_group.server.id]
   key_name               = aws_key_pair.ai_model_serving.key_name
 
+  # Manually created in AWS Console, not managed by Terraform, since
+  # it's a stable one-time role like the GitHub OIDC role.
+  iam_instance_profile = "ai-model-serving-ec2-weights-access"
+
   instance_market_options {
     market_type = "spot"
     spot_options {

@@ -1,0 +1,7 @@
+namespace: production
+
+model:
+  nodePort: 8012
+
+chatUI:
+  nodePort: 8002
