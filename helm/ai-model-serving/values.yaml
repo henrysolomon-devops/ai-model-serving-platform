@@ -1,0 +1,21 @@
+# Overridden by values-staging.yaml / values-production.yaml at deploy time
+
+namespace: staging
+
+model:
+  image:
+    repository: ghcr.io/henrysolomon-devops/ai-model-serving-platform-model
+    # Actual tag passed in via --set at deploy time (the build's commit
+    # SHA), never committed here.
+    tag: latest
+  servedModelName: llama-3.2-3b-instruct
+  weightsBucket: ai-model-serving-platform-weights
+  port: 8000
+  nodePort: 8011
+
+chatUI:
+  image:
+    repository: ghcr.io/henrysolomon-devops/ai-model-serving-platform-chat-ui
+    tag: latest
+  port: 5000
+  nodePort: 8001

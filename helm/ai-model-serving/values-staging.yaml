@@ -1,0 +1,7 @@
+namespace: staging
+
+model:
+  nodePort: 8011
+
+chatUI:
+  nodePort: 8001

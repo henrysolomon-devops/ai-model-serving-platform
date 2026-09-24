@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chat-ui
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chat-ui
+  template:
+    metadata:
+      labels:
+        app: chat-ui
+    spec:
+      containers:
+        - name: chat-ui
+          image: "{{ .Values.chatUI.image.repository }}:{{ .Values.chatUI.image.tag }}"
+          ports:
+            - containerPort: 5000
+          env:
+            # Talks to the model service over the cluster's internal DNS, not the
+            # external nodePort, so this traffic never touches the security group.
+            - name: MODEL_API_URL
+              value: "http://model-service.{{ .Values.namespace }}.svc.cluster.local:{{ .Values.model.port }}/v1/chat/completions"
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: api-key
+                  key: API_KEY
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            periodSeconds: 10

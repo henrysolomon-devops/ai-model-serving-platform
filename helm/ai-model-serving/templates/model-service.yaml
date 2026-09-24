@@ -1,0 +1,16 @@
+# NodePort, not LoadBalancer or Ingress: no ingress controller is
+# running (see install-k3s.yml), and none is needed until KServe in
+# v4. This nodePort must match the security group rule for this port.
+apiVersion: v1
+kind: Service
+metadata:
+  name: model-service
+  namespace: {{ .Values.namespace }}
+spec:
+  type: NodePort
+  selector:
+    app: model-service
+  ports:
+    - port: {{ .Values.model.port }}
+      targetPort: {{ .Values.model.port }}
+      nodePort: {{ .Values.model.nodePort }}
