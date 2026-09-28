@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Checks local disk, then S3 cache, then falls back to Hugging Face,
-# caching each fresh download back to S3 for the next run.
+# Loads Llama-3.2-3B-Instruct from S3 if it's already cached there
+# from a previous run, otherwise downloads it from Hugging Face (using
+# a gated-model token) and uploads it to S3 so the next run skips the
+# download entirely. Then hands off to vLLM to actually serve it.
 set -euo pipefail
 
 MODEL_ID="meta-llama/Llama-3.2-3B-Instruct"
@@ -16,7 +18,7 @@ fi
 
 if [ ! -f "${MODEL_DIR}/config.json" ]; then
   echo "Not cached in S3 either, downloading from Hugging Face..."
-  huggingface-cli download "${MODEL_ID}" \
+  hf download "${MODEL_ID}" \
     --local-dir "${MODEL_DIR}" \
     --token "${HF_TOKEN}"
 
@@ -26,8 +28,9 @@ else
   echo "Using weights already present (local disk or S3 cache)."
 fi
 
-# Tuned for a single T4's 16GB, not the model's full default, since
-# each environment gets exactly one T4, not a whole free card.
+# --gpu-memory-utilization and --max-model-len are tuned for a single
+# T4's 16GB, not for the full model default, since every environment
+# here gets exactly one T4, not the whole card free for one process.
 exec vllm serve "${MODEL_DIR}" \
   --host 0.0.0.0 \
   --port 8000 \
