@@ -1,30 +1,44 @@
 #!/usr/bin/env bash
-# Takes the server's public IP as an argument (passed in from
-# `terraform output` by infra.yml), runs the Ansible playbook against
-# it to install k3s, then fetches the kubeconfig so kubectl/helm can
-# be used against this cluster from outside.
+# Takes the control plane's public IP, the worker's public IP, and the
+# control plane's private IP (all from `terraform output`, passed in by
+# infra.yml). Runs the Ansible playbook against both nodes to build the
+# k3s cluster, then fetches the kubeconfig so kubectl/helm can be used
+# against it from outside.
 set -euo pipefail
 
-if [ -z "${1:-}" ]; then
-  echo "Usage: $0 <server-public-ip>"
+if [ $# -lt 3 ]; then
+  echo "Usage: $0 <control-plane-public-ip> <worker-public-ip> <control-plane-private-ip>"
   exit 1
 fi
 
-SERVER_IP="$1"
-echo "Using server IP: $SERVER_IP"
+CONTROL_PLANE_IP="$1"
+WORKER_IP="$2"
+CONTROL_PLANE_PRIVATE_IP="$3"
+echo "Control plane: $CONTROL_PLANE_IP (private: $CONTROL_PLANE_PRIVATE_IP)"
+echo "Worker: $WORKER_IP"
 
-ansible-playbook -i "${SERVER_IP}," install-k3s.yml \
-  --extra-vars "ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/ai-model-serving-key tls_san=${SERVER_IP}"
+INVENTORY=$(mktemp)
+trap 'rm -f "$INVENTORY"' EXIT
+cat > "$INVENTORY" <<EOF
+[control_plane]
+${CONTROL_PLANE_IP}
+
+[worker]
+${WORKER_IP}
+EOF
+
+ansible-playbook -i "$INVENTORY" install-k3s.yml \
+  --extra-vars "ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/ai-model-serving-key tls_san=${CONTROL_PLANE_IP} control_plane_private_ip=${CONTROL_PLANE_PRIVATE_IP}"
 
 echo "Fetching kubeconfig..."
 mkdir -p ~/.kube
 ssh -i ~/.ssh/ai-model-serving-key -o StrictHostKeyChecking=accept-new \
-  ubuntu@"$SERVER_IP" "sudo cat /etc/rancher/k3s/k3s.yaml" > ~/.kube/ai-model-serving-config
-sed -i "s/127.0.0.1/${SERVER_IP}/" ~/.kube/ai-model-serving-config
+  ubuntu@"$CONTROL_PLANE_IP" "sudo cat /etc/rancher/k3s/k3s.yaml" > ~/.kube/ai-model-serving-config
+sed -i "s/127.0.0.1/${CONTROL_PLANE_IP}/" ~/.kube/ai-model-serving-config
 
 echo "Done. Run this to use kubectl/helm against this cluster:"
 echo "  export KUBECONFIG=~/.kube/ai-model-serving-config"
 echo ""
 echo "Once the model service is deployed (later steps), it will be reachable at:"
-echo "  Staging:    http://${SERVER_IP}:8001  (chat UI)   http://${SERVER_IP}:8011  (model API)"
-echo "  Production: http://${SERVER_IP}:8002  (chat UI)   http://${SERVER_IP}:8012  (model API)"
+echo "  Staging:    http://${CONTROL_PLANE_IP}:8001  (chat UI)   http://${CONTROL_PLANE_IP}:8011  (model API)"
+echo "  Production: http://${WORKER_IP}:8002  (chat UI)   http://${WORKER_IP}:8012  (model API)"
