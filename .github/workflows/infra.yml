@@ -1,7 +1,7 @@
 name: Infrastructure (Terraform + Ansible)
 
 # Manual on purpose, this touches real GPU-instance money. Pick apply
-# to bring the server up (Terraform, then k3s and the NVIDIA device
+# to bring the cluster up (Terraform, then k3s and the NVIDIA device
 # plugin via Ansible), or destroy to tear everything down again.
 on:
   workflow_dispatch:
@@ -69,10 +69,13 @@ jobs:
         if: inputs.action == 'apply'
         run: terraform apply -auto-approve -var="my_ip=${{ vars.MY_IP }}"
 
-      - name: Get the server's public IP
+      - name: Get the nodes' IP addresses
         if: inputs.action == 'apply'
-        id: server_ip
-        run: echo "ip=$(terraform output -raw server_public_ip)" >> "$GITHUB_OUTPUT"
+        id: ips
+        run: |
+          echo "control_plane=$(terraform output -raw control_plane_public_ip)" >> "$GITHUB_OUTPUT"
+          echo "worker=$(terraform output -raw worker_public_ip)" >> "$GITHUB_OUTPUT"
+          echo "control_plane_private=$(terraform output -raw control_plane_private_ip)" >> "$GITHUB_OUTPUT"
 
       - name: Look up the security group this run needs to touch
         if: inputs.action == 'apply'
@@ -107,10 +110,14 @@ jobs:
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/ai-model-serving-key
           chmod 600 ~/.ssh/ai-model-serving-key
 
-      - name: Run the Ansible playbook to install k3s and the NVIDIA device plugin
+      - name: Run the Ansible playbook to build the cluster and expose the GPUs
         if: inputs.action == 'apply'
         working-directory: ansible
-        run: ./deploy-k3s.sh "${{ steps.server_ip.outputs.ip }}"
+        run: |
+          ./deploy-k3s.sh \
+            "${{ steps.ips.outputs.control_plane }}" \
+            "${{ steps.ips.outputs.worker }}" \
+            "${{ steps.ips.outputs.control_plane_private }}"
 
       - name: Create the staging and production namespaces
         if: inputs.action == 'apply'
