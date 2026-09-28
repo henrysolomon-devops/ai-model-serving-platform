@@ -1,10 +1,11 @@
 ---
-# Installs k3s on the GPU instance Terraform just created, then makes
-# its 4 GPUs visible to Kubernetes via the NVIDIA device plugin, so
-# vLLM can request a GPU once it's deployed later.
+# Builds a two-node k3s cluster on the GPU instances Terraform just
+# created. The control plane hosts staging, the worker hosts production,
+# and each node's GPU is exposed to Kubernetes through the NVIDIA device
+# plugin, so vLLM can request one once it's deployed later.
 
-- name: Install k3s and expose the GPUs to Kubernetes
-  hosts: all
+- name: Install k3s on the control plane
+  hosts: control_plane
   become: true
   gather_facts: false
 
@@ -31,8 +32,11 @@
     # server's public IP. --service-node-port-range: narrows the allowed
     # NodePort range down to cover this project's ports (8001-8012).
     # --disable traefik: not needed since KServe takes over routing later.
+    # --node-label: lets Helm pin staging to this node.
+    # --default-runtime nvidia: makes containers use the NVIDIA runtime,
+    # so pods that request a GPU can actually see it.
     - name: Download and run the official k3s install script
-      shell: curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--tls-san {{ tls_san }} --kube-apiserver-arg=service-node-port-range=8001-8012 --disable traefik" sh -
+      shell: curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--tls-san {{ tls_san }} --kube-apiserver-arg=service-node-port-range=8001-8012 --disable traefik --node-label environment=staging --default-runtime nvidia" sh -
       args:
         creates: /usr/local/bin/k3s
 
@@ -42,42 +46,93 @@
         state: started
         enabled: true
 
-    - name: Wait until the node reports Ready
-      shell: k3s kubectl get nodes
+    - name: Read the join token the worker needs
+      command: cat /var/lib/rancher/k3s/server/node-token
+      register: k3s_token
+      changed_when: false
+      no_log: true
+
+- name: Join the worker to the cluster
+  hosts: worker
+  become: true
+  gather_facts: false
+
+  vars:
+    join_token: "{{ hostvars[groups['control_plane'][0]].k3s_token.stdout }}"
+
+  tasks:
+    - name: Wait until SSH is reliably reachable, not just reachable once
+      wait_for_connection:
+        delay: 10
+        timeout: 180
+
+    - name: Now that the connection is stable, gather facts
+      setup:
+
+    - name: Update the apt package cache
+      apt:
+        update_cache: true
+        lock_timeout: 180
+
+    # K3S_URL is what makes the install script set this node up as a
+    # worker instead of a server. It joins over the VPC's private
+    # network. --node-label lets Helm pin production to this node.
+    - name: Download and run the official k3s install script as a worker
+      shell: curl -sfL https://get.k3s.io | K3S_URL=https://{{ control_plane_private_ip }}:6443 K3S_TOKEN='{{ join_token }}' INSTALL_K3S_EXEC="--node-label environment=production --default-runtime nvidia" sh -
+      args:
+        creates: /usr/local/bin/k3s
+      no_log: true
+
+    - name: Wait for the k3s worker service to be active
+      systemd:
+        name: k3s-agent
+        state: started
+        enabled: true
+
+- name: Expose the GPUs to Kubernetes
+  hosts: control_plane
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Wait until both nodes report Ready
+      shell: k3s kubectl get nodes --no-headers
       register: node_status
-      until: "'Ready' in node_status.stdout"
-      retries: 10
-      delay: 5
+      until: "node_status.stdout_lines | select('search', '\\sReady\\s') | list | length == 2"
+      retries: 20
+      delay: 10
+      changed_when: false
 
     - name: Show the node status
       debug:
         var: node_status.stdout_lines
 
-    # The standard NVIDIA device plugin, not the GPU Operator (see
-    # PROJECT_PLAN). With one GPU per environment and no time-slicing,
-    # this DaemonSet alone is enough for Kubernetes to see all 4 GPUs.
+    # The standard NVIDIA device plugin, not the GPU Operator.
+    # With one GPU per node and no time-slicing, this
+    # DaemonSet alone is enough for Kubernetes to see every GPU.
     - name: Apply the NVIDIA device plugin
       shell: >
         k3s kubectl apply -f
         https://raw.githubusercontent.com/NVIDIA/k8s-device-plugin/v0.20.0/deployments/static/nvidia-device-plugin.yml
 
-    - name: Wait for the device plugin's DaemonSet to be ready
+    - name: Wait for the device plugin to be ready on both nodes
       shell: k3s kubectl get daemonset nvidia-device-plugin-daemonset -n kube-system -o jsonpath='{.status.numberReady}'
       register: plugin_ready
-      until: plugin_ready.stdout == "1"
+      until: plugin_ready.stdout == "2"
       retries: 20
       delay: 10
+      changed_when: false
 
-    # The real proof this worked: if the node doesn't report
-    # nvidia.com/gpu: 4 here, nothing that requests a GPU later will
-    # ever get scheduled.
-    - name: Confirm the node reports all 4 GPUs
-      shell: k3s kubectl get node -o jsonpath='{.items[0].status.allocatable.nvidia\.com/gpu}'
+    # The real proof this worked: if each node doesn't report one GPU
+    # here, nothing that requests a GPU later will ever get scheduled.
+    - name: Confirm each node reports one GPU
+      shell: k3s kubectl get nodes -o jsonpath='{.items[*].status.allocatable.nvidia\.com/gpu}'
       register: gpu_count
-      until: gpu_count.stdout == "4"
+      until: "gpu_count.stdout.split() == ['1', '1']"
       retries: 15
       delay: 10
+      changed_when: false
 
     - name: Show the GPU count Kubernetes actually sees
       debug:
-        msg: "Node reports {{ gpu_count.stdout }} allocatable GPU(s)"
+        msg: "Allocatable GPUs per node: {{ gpu_count.stdout }}"

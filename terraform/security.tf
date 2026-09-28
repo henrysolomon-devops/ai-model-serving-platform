@@ -1,6 +1,6 @@
 resource "aws_security_group" "server" {
   name        = "ai-model-serving-sg"
-  description = "Security group for the GPU EC2/k3s server. SSH, k3s API, and app/model ports are always open for me. GitHub runners get temporary access per workflow run."
+  description = "Security group for the GPU k3s nodes. SSH, k3s API, and app/model ports are always open for me. GitHub runners get temporary access per workflow run."
   vpc_id      = aws_vpc.main.id
 
   ingress {
@@ -35,6 +35,14 @@ resource "aws_security_group" "server" {
     to_port     = 6443
     protocol    = "tcp"
     cidr_blocks = [var.my_ip]
+  }
+
+  ingress {
+    description = "All traffic between the cluster nodes"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    self        = true
   }
 
   egress {
