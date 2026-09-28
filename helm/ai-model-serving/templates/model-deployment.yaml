@@ -5,6 +5,11 @@ metadata:
   namespace: {{ .Values.namespace }}
 spec:
   replicas: 1
+  # Each environment has exactly one GPU, so the old pod must release
+  # it before the new one can start. A rolling update would leave the
+  # new pod stuck in Pending.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: model-service
@@ -13,6 +18,10 @@ spec:
       labels:
         app: model-service
     spec:
+      # Pins this environment to its own node. Ansible labels the nodes
+      # at install time: environment=staging or environment=production.
+      nodeSelector:
+        environment: {{ .Values.namespace }}
       containers:
         - name: model-service
           image: "{{ .Values.model.image.repository }}:{{ .Values.model.image.tag }}"

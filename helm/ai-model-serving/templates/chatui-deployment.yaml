@@ -13,6 +13,9 @@ spec:
       labels:
         app: chat-ui
     spec:
+      # Keeps this environment's chat UI on the same node as its model.
+      nodeSelector:
+        environment: {{ .Values.namespace }}
       containers:
         - name: chat-ui
           image: "{{ .Values.chatUI.image.repository }}:{{ .Values.chatUI.image.tag }}"
