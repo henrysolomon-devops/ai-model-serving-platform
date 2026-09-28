@@ -31,6 +31,10 @@ jobs:
       image_tag: ${{ github.sha }}
 
     steps:
+      # The vLLM image is large and runners only have ~14GB free by default.
+      - name: Free up disk space for the large model image
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -107,13 +111,16 @@ jobs:
             --from-literal=API_KEY=${{ secrets.API_KEY }} \
             -n ${{ inputs.environment }} --dry-run=client -o yaml | kubectl apply -f -
 
+      # --wait makes the job fail if the pods never become ready,
+      # instead of going green right after applying the manifests.
       - name: Deploy with Helm
         run: |
           helm upgrade --install ai-model-serving helm/ai-model-serving \
             -f helm/ai-model-serving/values-${{ inputs.environment }}.yaml \
             --set model.image.tag=${{ needs.build.outputs.image_tag }} \
             --set chatUI.image.tag=${{ needs.build.outputs.image_tag }} \
-            -n ${{ inputs.environment }}
+            -n ${{ inputs.environment }} \
+            --wait --timeout 20m
 
       - name: Close the temporary access back up
         if: always()
