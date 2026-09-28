@@ -4,11 +4,13 @@
 # be built from source.
 FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
 
-# gcc is needed at runtime, not just build time: vLLM's torch.compile
-# backend (Triton) compiles CUDA kernels on the fly on first request,
-# and the plain "runtime" CUDA base image doesn't ship a C compiler.
+# build-essential (not just gcc) is needed at runtime, not just build
+# time: vLLM's torch.compile backend (Triton) compiles CUDA kernels on
+# the fly on first request, and needs both a compiler and the standard
+# C headers (stdlib.h etc.) that gcc alone doesn't pull in on this
+# minimal "runtime" CUDA base image.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      python3 python3-pip curl unzip gcc \
+      python3 python3-pip curl unzip build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 # AWS CLI, used only by entrypoint.sh to sync cached model weights
