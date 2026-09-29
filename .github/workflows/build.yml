@@ -52,3 +52,49 @@ jobs:
         run: |
           docker build -t "$CHATUI_IMAGE:${{ github.sha }}" -f chat-ui/Dockerfile chat-ui
           docker push "$CHATUI_IMAGE:${{ github.sha }}"
+
+  # On main this opens a PR that moves staging to the new image. On the
+  # feature branch it only shows the change, so it can be tested safely.
+  bump-staging:
+    needs: build
+    runs-on: ubuntu-latest
+    concurrency:
+      group: bump-staging
+      cancel-in-progress: false
+    env:
+      SHA: ${{ github.sha }}
+      GH_TOKEN: ${{ secrets.ADMIN_PAT }}
+      VALUES: helm/ai-model-serving/values-staging.yaml
+    steps:
+      # A PAT, not GITHUB_TOKEN, so the PR it opens can trigger CI.
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.ADMIN_PAT }}
+
+      - name: Point staging at the new image tag
+        run: |
+          sed -i -E "s/^(    tag: ).*/\1\"$SHA\"/" "$VALUES"
+          git --no-pager diff
+
+      - name: Close older bump PRs that are still open
+        if: github.ref == 'refs/heads/main'
+        run: |
+          gh pr list --state open --json number,headRefName \
+            --jq '.[] | select(.headRefName | startswith("bot/staging-")) | .number' |
+          while read -r n; do
+            gh pr close "$n" --delete-branch --comment "Superseded by ${SHA:0:7}"
+          done
+
+      - name: Open the PR and turn on auto-merge
+        if: github.ref == 'refs/heads/main'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          branch="bot/staging-${SHA:0:7}"
+          git checkout -b "$branch"
+          git commit -am "Deploy ${SHA:0:7} to staging"
+          git push origin "$branch"
+          gh pr create --base main --head "$branch" \
+            --title "Deploy ${SHA:0:7} to staging" \
+            --body "Automated: moves staging to the images built from $SHA."
+          gh pr merge "$branch" --auto --squash
