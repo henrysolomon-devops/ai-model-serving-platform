@@ -1,0 +1,2 @@
+-r ../chat-ui/requirements.txt
+pytest
