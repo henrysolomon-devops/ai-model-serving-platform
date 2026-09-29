@@ -1,0 +1,142 @@
+name: Staging smoke test
+
+# Runs after the bot moves staging to a new image. Also runnable by hand
+# once the infrastructure is back up. The result is recorded on the
+# image's commit, which is what promote.yml checks.
+on:
+  push:
+    branches: [main]
+    paths:
+      - helm/ai-model-serving/values-staging.yaml
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+  statuses: write
+
+concurrency:
+  group: smoke-test
+  cancel-in-progress: false
+
+env:
+  ROLE_ARN: arn:aws:iam::578254188866:role/github-actions-ai-model-serving-role
+
+jobs:
+  check-infra:
+    runs-on: ubuntu-latest
+    environment: staging
+    outputs:
+      up: ${{ steps.check.outputs.up }}
+      sg: ${{ steps.check.outputs.sg }}
+      tag: ${{ steps.check.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.ROLE_ARN }}
+          aws-region: us-east-1
+
+      # The security group only exists while Terraform's infrastructure does.
+      - name: Check whether the infrastructure is up
+        id: check
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          sg=$(aws ec2 describe-security-groups \
+            --filters Name=group-name,Values=ai-model-serving-sg \
+            --query 'SecurityGroups[0].GroupId' --output text)
+          tag=$(sed -n 's/^    tag: "\(.*\)"$/\1/p' helm/ai-model-serving/values-staging.yaml | sort -u | head -1)
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if [ "$sg" = "None" ]; then
+            echo "up=false" >> "$GITHUB_OUTPUT"
+            if [ "$EVENT" = "workflow_dispatch" ]; then
+              echo "::error::Infrastructure is down. Run the Infrastructure workflow with apply first."
+              exit 1
+            fi
+            echo "::notice::Infrastructure is down, so the smoke test was skipped."
+            exit 0
+          fi
+          echo "up=true" >> "$GITHUB_OUTPUT"
+          echo "sg=$sg" >> "$GITHUB_OUTPUT"
+
+  smoke-test:
+    needs: check-infra
+    if: needs.check-infra.outputs.up == 'true'
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 45
+    env:
+      SG: ${{ needs.check-infra.outputs.sg }}
+      TAG: ${{ needs.check-infra.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Let this runner reach the k3s API and the staging ports
+        id: access
+        run: |
+          cidr="$(curl -s ifconfig.me)/32"
+          echo "cidr=$cidr" >> "$GITHUB_OUTPUT"
+          for port in 6443 8001 8011; do
+            aws ec2 authorize-security-group-ingress \
+              --group-id "$SG" --protocol tcp --port "$port" --cidr "$cidr"
+          done
+
+      # Argo CD polls Git every few minutes, so wait for the new tag to land.
+      - name: Wait for Argo CD to roll out the tag
+        id: rollout
+        env:
+          KUBECONFIG_B64: ${{ secrets.KUBECONFIG_B64 }}
+        run: |
+          mkdir -p ~/.kube
+          echo "$KUBECONFIG_B64" | base64 -d > ~/.kube/config
+          deadline=$((SECONDS + 1500))
+          until [ "$(kubectl get deployment model-service -n staging \
+              -o jsonpath='{.spec.template.spec.containers[0].image}' | sed 's/.*://')" = "$TAG" ]; do
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::Staging never picked up ${TAG:0:7}."
+              exit 1
+            fi
+            sleep 20
+          done
+          kubectl rollout status deployment/model-service -n staging --timeout=20m
+          kubectl rollout status deployment/chat-ui -n staging --timeout=5m
+          ip=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}' \
+            | sed -E 's|https://([^:]+):.*|\1|')
+          echo "ip=$ip" >> "$GITHUB_OUTPUT"
+
+      - name: Run the smoke test
+        env:
+          API_KEY: ${{ secrets.API_KEY }}
+          SERVER_IP: ${{ steps.rollout.outputs.ip }}
+        run: bash test/smoke-test.sh staging "$SERVER_IP" "$API_KEY"
+
+      - name: Close the temporary access
+        if: always()
+        env:
+          CIDR: ${{ steps.access.outputs.cidr }}
+        run: |
+          for port in 6443 8001 8011; do
+            aws ec2 revoke-security-group-ingress \
+              --group-id "$SG" --protocol tcp --port "$port" --cidr "$CIDR" || true
+          done
+
+      - name: Record the result on the image's commit
+        if: always() && !cancelled()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          state=failure
+          [ "$JOB_STATUS" = "success" ] && state=success
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$TAG" \
+            -f state="$state" \
+            -f context="staging-smoke-test" \
+            -f description="Smoke test on staging: $state" \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
