@@ -1,0 +1,76 @@
+name: Promote to production
+
+# Copies the image tags staging is running into values-production.yaml
+# and opens a PR. Merging that PR is what deploys to production.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: promote
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.ADMIN_PAT }}
+      STAGING: helm/ai-model-serving/values-staging.yaml
+      PRODUCTION: helm/ai-model-serving/values-production.yaml
+    steps:
+      # A PAT, not GITHUB_TOKEN, so the PR it opens can trigger CI.
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.ADMIN_PAT }}
+
+      - name: Compare staging and production
+        id: compare
+        run: |
+          tags() { sed -n 's/^    tag: "\(.*\)"$/\1/p' "$1" | sort -u; }
+          staging=$(tags "$STAGING")
+          production=$(tags "$PRODUCTION" | paste -sd, -)
+          if [ "$(echo "$staging" | wc -l)" -ne 1 ]; then
+            echo "Staging has more than one tag, refusing to promote."
+            exit 1
+          fi
+          {
+            echo "staging=$staging"
+            echo "production=$production"
+          } >> "$GITHUB_OUTPUT"
+          if [ "$staging" = "$production" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Production already runs ${staging:0:7}, nothing to promote."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Close older promote PRs that are still open
+        if: steps.compare.outputs.changed == 'true'
+        run: |
+          gh pr list --state open --json number,headRefName \
+            --jq '.[] | select(.headRefName | startswith("bot/promote-")) | .number' |
+          while read -r n; do
+            gh pr close "$n" --delete-branch --comment "Superseded by a newer promote"
+          done
+
+      # No auto-merge on purpose: production is merged by hand.
+      - name: Open the promote PR
+        if: steps.compare.outputs.changed == 'true'
+        env:
+          NEW: ${{ steps.compare.outputs.staging }}
+          OLD: ${{ steps.compare.outputs.production }}
+        run: |
+          sed -i -E "s/^(    tag: ).*/\1\"$NEW\"/" "$PRODUCTION"
+          git --no-pager diff
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          branch="bot/promote-${NEW:0:7}"
+          git checkout -b "$branch"
+          git commit -am "Promote ${NEW:0:7} to production"
+          git push origin "$branch"
+          gh pr create --base main --head "$branch" \
+            --title "Promote ${NEW:0:7} to production" \
+            --body "Moves production from ${OLD:0:7} to ${NEW:0:7}. Merging this deploys it."
