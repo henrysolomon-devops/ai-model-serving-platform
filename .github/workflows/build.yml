@@ -1,12 +1,9 @@
 name: Build
 
 # Runs after a merge to main, but only when the images' inputs change.
-# The feature branch and build.yml path are temporary, for testing v2.
 on:
   push:
-    branches:
-      - main
-      - feature/v2-gitops
+    branches: [main]
     paths:
       - model-service/**
       - chat-ui/**
@@ -53,8 +50,7 @@ jobs:
           docker build -t "$CHATUI_IMAGE:${{ github.sha }}" -f chat-ui/Dockerfile chat-ui
           docker push "$CHATUI_IMAGE:${{ github.sha }}"
 
-  # On main this opens a PR that moves staging to the new image. On the
-  # feature branch it only shows the change, so it can be tested safely.
+  # Opens a PR that moves staging to the new image, with auto-merge on.
   bump-staging:
     needs: build
     runs-on: ubuntu-latest
@@ -77,7 +73,6 @@ jobs:
           git --no-pager diff
 
       - name: Close older bump PRs that are still open
-        if: github.ref == 'refs/heads/main'
         run: |
           gh pr list --state open --json number,headRefName \
             --jq '.[] | select(.headRefName | startswith("bot/staging-")) | .number' |
@@ -86,7 +81,6 @@ jobs:
           done
 
       - name: Open the PR and turn on auto-merge
-        if: github.ref == 'refs/heads/main'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

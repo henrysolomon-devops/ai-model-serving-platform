@@ -26,6 +26,9 @@ concurrency:
   group: infra
   cancel-in-progress: false
 
+env:
+  ARGOCD_VERSION: v3.5.3
+
 jobs:
   infra:
     runs-on: ubuntu-latest
@@ -125,6 +128,40 @@ jobs:
           export KUBECONFIG=~/.kube/ai-model-serving-config
           kubectl create namespace staging --dry-run=client -o yaml | kubectl apply -f -
           kubectl create namespace production --dry-run=client -o yaml | kubectl apply -f -
+
+      # Created here, not by the chart, so the values never touch git.
+      - name: Create the hf-token and api-key secrets
+        if: inputs.action == 'apply'
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          API_KEY: ${{ secrets.API_KEY }}
+        run: |
+          export KUBECONFIG=~/.kube/ai-model-serving-config
+          for ns in staging production; do
+            kubectl create secret generic hf-token --from-literal=HF_TOKEN="$HF_TOKEN" \
+              -n "$ns" --dry-run=client -o yaml | kubectl apply -f -
+            kubectl create secret generic api-key --from-literal=API_KEY="$API_KEY" \
+              -n "$ns" --dry-run=client -o yaml | kubectl apply -f -
+          done
+
+      # Server-side apply is required, some Argo CD CRDs are too big for client-side.
+      - name: Install Argo CD
+        if: inputs.action == 'apply'
+        run: |
+          export KUBECONFIG=~/.kube/ai-model-serving-config
+          kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
+          kubectl apply -n argocd --server-side --force-conflicts \
+            -f "https://raw.githubusercontent.com/argoproj/argo-cd/${ARGOCD_VERSION}/manifests/install.yaml"
+          kubectl wait --for=condition=Established crd/applications.argoproj.io --timeout=120s
+          kubectl rollout status deployment/argocd-server -n argocd --timeout=300s
+          kubectl rollout status deployment/argocd-repo-server -n argocd --timeout=300s
+          kubectl rollout status statefulset/argocd-application-controller -n argocd --timeout=300s
+
+      - name: Point Argo CD at the repo
+        if: inputs.action == 'apply'
+        run: |
+          export KUBECONFIG=~/.kube/ai-model-serving-config
+          kubectl apply -f "$GITHUB_WORKSPACE/argocd/"
 
       - name: Save the freshly generated kubeconfig as a repo secret
         if: inputs.action == 'apply'
