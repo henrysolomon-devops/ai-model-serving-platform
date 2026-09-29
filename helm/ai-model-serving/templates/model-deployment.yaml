@@ -5,6 +5,8 @@ metadata:
   namespace: {{ required "namespace must be set" .Values.namespace }}
 spec:
   replicas: 1
+  # A cold start can take well over the default 10 minutes.
+  progressDeadlineSeconds: 1500
   # One GPU per environment: the old pod must release it before the
   # new one can start, so a rolling update would hang in Pending.
   strategy:
@@ -44,13 +46,14 @@ spec:
               nvidia.com/gpu: 1
             requests:
               nvidia.com/gpu: 1
-          # A cold start may download ~6GB of weights, so give it a long window.
+          # A cold start downloads ~6GB of weights and compiles kernels,
+          # so allow up to 20 minutes (80 x 15s) before restarting.
           startupProbe:
             httpGet:
               path: /health
               port: {{ .Values.model.port }}
             periodSeconds: 15
-            failureThreshold: 40
+            failureThreshold: 80
           livenessProbe:
             httpGet:
               path: /health
