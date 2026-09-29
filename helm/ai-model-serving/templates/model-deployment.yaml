@@ -2,12 +2,11 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: model-service
-  namespace: {{ .Values.namespace }}
+  namespace: {{ required "namespace must be set" .Values.namespace }}
 spec:
   replicas: 1
-  # Each environment has exactly one GPU, so the old pod must release
-  # it before the new one can start. A rolling update would leave the
-  # new pod stuck in Pending.
+  # One GPU per environment: the old pod must release it before the
+  # new one can start, so a rolling update would hang in Pending.
   strategy:
     type: Recreate
   selector:
@@ -18,21 +17,18 @@ spec:
       labels:
         app: model-service
     spec:
-      # Pins this environment to its own node. Ansible labels the nodes
-      # at install time: environment=staging or environment=production.
+      # Ansible labels each node environment=staging or environment=production.
       nodeSelector:
         environment: {{ .Values.namespace }}
       containers:
         - name: model-service
-          image: "{{ .Values.model.image.repository }}:{{ .Values.model.image.tag }}"
+          image: "{{ .Values.model.image.repository }}:{{ required "model.image.tag must be set" .Values.model.image.tag }}"
           ports:
             - containerPort: {{ .Values.model.port }}
           env:
             - name: WEIGHTS_BUCKET
               value: {{ .Values.model.weightsBucket }}
-            # hf-token and api-key are created directly with kubectl by
-            # deploy-model.yml, not by this chart, so the actual secret
-            # values never need to appear in a values file or in git.
+            # Secrets are created outside the chart so values never touch git.
             - name: HF_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -48,9 +44,7 @@ spec:
               nvidia.com/gpu: 1
             requests:
               nvidia.com/gpu: 1
-          # A cold start can mean downloading ~6GB of weights from Hugging Face
-          # or S3, so this gets a generous window before Kubernetes gives up.
-          # Once /health responds, the tighter liveness/readiness checks take over.
+          # A cold start may download ~6GB of weights, so give it a long window.
           startupProbe:
             httpGet:
               path: /health

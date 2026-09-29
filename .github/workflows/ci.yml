@@ -1,0 +1,58 @@
+name: CI
+
+# Runners have no GPU, so this only checks contracts: the chat proxy's
+# behavior against a fake model backend, the Helm chart, and the scripts.
+on:
+  pull_request:
+    branches: [main]
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  chat-ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            chat-ui/requirements.txt
+            test/requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r test/requirements-dev.txt
+
+      - name: Run contract tests
+        run: python -m pytest test -v
+        env:
+          PYTHONPATH: chat-ui
+
+  helm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+
+      - name: Lint and render both environments
+        run: |
+          for env in staging production; do
+            helm lint helm/ai-model-serving -f helm/ai-model-serving/values-$env.yaml
+            helm template t helm/ai-model-serving -f helm/ai-model-serving/values-$env.yaml > /dev/null
+          done
+
+      - name: Rendering without an environment file must fail
+        run: "! helm template t helm/ai-model-serving"
+
+  scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shellcheck
+        run: shellcheck model-service/entrypoint.sh test/smoke-test.sh ansible/deploy-k3s.sh
