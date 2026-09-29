@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: chat-ui
-  namespace: {{ .Values.namespace }}
+  namespace: {{ required "namespace must be set" .Values.namespace }}
 spec:
   replicas: 1
   selector:
@@ -13,17 +13,16 @@ spec:
       labels:
         app: chat-ui
     spec:
-      # Keeps this environment's chat UI on the same node as its model.
+      # Same node as this environment's model.
       nodeSelector:
         environment: {{ .Values.namespace }}
       containers:
         - name: chat-ui
-          image: "{{ .Values.chatUI.image.repository }}:{{ .Values.chatUI.image.tag }}"
+          image: "{{ .Values.chatUI.image.repository }}:{{ required "chatUI.image.tag must be set" .Values.chatUI.image.tag }}"
           ports:
-            - containerPort: 5000
+            - containerPort: {{ .Values.chatUI.port }}
           env:
-            # Talks to the model service over the cluster's internal DNS, not the
-            # external nodePort, so this traffic never touches the security group.
+            # Internal cluster DNS, so this traffic never leaves the cluster.
             - name: MODEL_API_URL
               value: "http://model-service.{{ .Values.namespace }}.svc.cluster.local:{{ .Values.model.port }}/v1/chat/completions"
             - name: API_KEY
@@ -34,5 +33,5 @@ spec:
           readinessProbe:
             httpGet:
               path: /health
-              port: 5000
+              port: {{ .Values.chatUI.port }}
             periodSeconds: 10
