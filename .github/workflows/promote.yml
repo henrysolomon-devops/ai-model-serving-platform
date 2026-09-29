@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  statuses: read
 
 concurrency:
   group: promote
@@ -45,6 +46,20 @@ jobs:
             echo "Production already runs ${staging:0:7}, nothing to promote."
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # smoke-test.yml records its result on the image's commit.
+      - name: Check that staging passed the smoke test
+        if: steps.compare.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.compare.outputs.staging }}
+        run: |
+          state=$(gh api "repos/$GITHUB_REPOSITORY/commits/$TAG/statuses" \
+            --jq '[.[] | select(.context == "staging-smoke-test")] | .[0].state // "none"')
+          if [ "$state" != "success" ]; then
+            echo "::error::${TAG:0:7} has no passing staging smoke test (result: $state). Bring the infrastructure up and run the Staging smoke test workflow first."
+            exit 1
           fi
 
       - name: Close older promote PRs that are still open

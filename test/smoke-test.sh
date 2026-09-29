@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Run by hand after each deploy-model.yml run, since there's no CI/CD
-# to automate this yet (that's v2). Checks both health endpoints, then
-# sends a real prompt and confirms the model's response looks right.
+# Checks both health endpoints, then sends a real prompt and confirms
+# the model's response looks right. Run by smoke-test.yml once staging
+# has synced, or by hand against either environment.
 set -euo pipefail
 
 if [ $# -lt 3 ]; then
@@ -25,13 +25,14 @@ else
 fi
 
 echo "Checking model service health on port ${MODEL_PORT}..."
-curl -sf "http://${SERVER_IP}:${MODEL_PORT}/health" > /dev/null
+curl -sf --max-time 30 "http://${SERVER_IP}:${MODEL_PORT}/health" > /dev/null
 
 echo "Checking chat UI health on port ${UI_PORT}..."
-curl -sf "http://${SERVER_IP}:${UI_PORT}/health" > /dev/null
+curl -sf --max-time 30 "http://${SERVER_IP}:${UI_PORT}/health" > /dev/null
 
 echo "Sending a real prompt to the model..."
-RESPONSE=$(curl -sf -X POST "http://${SERVER_IP}:${MODEL_PORT}/v1/chat/completions" \
+# The first request can be slow while vLLM compiles its kernels.
+RESPONSE=$(curl -sf --max-time 300 -X POST "http://${SERVER_IP}:${MODEL_PORT}/v1/chat/completions" \
   -H "Authorization: Bearer ${API_KEY}" \
   -H "Content-Type: application/json" \
   -d '{
