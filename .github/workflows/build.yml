@@ -7,10 +7,14 @@ on:
     paths:
       - model-service/**
       - chat-ui/**
-      - .github/workflows/build.yml
 
 permissions:
   contents: read
+
+# GitHub sometimes delivers the same push twice. Keep one build per commit.
+concurrency:
+  group: build-${{ github.sha }}
+  cancel-in-progress: true
 
 env:
   MODEL_IMAGE: ghcr.io/henrysolomon-devops/ai-model-serving-platform-model
@@ -65,14 +69,23 @@ jobs:
       # A PAT, not GITHUB_TOKEN, so the PR it opens can trigger CI.
       - uses: actions/checkout@v4
         with:
+          ref: main
           token: ${{ secrets.ADMIN_PAT }}
 
       - name: Point staging at the new image tag
+        id: bump
         run: |
           sed -i -E "s/^(    tag: ).*/\1\"$SHA\"/" "$VALUES"
-          git --no-pager diff
+          if git diff --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Staging already points at ${SHA:0:7}, nothing to do."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git --no-pager diff
+          fi
 
       - name: Close older bump PRs that are still open
+        if: steps.bump.outputs.changed == 'true'
         run: |
           gh pr list --state open --json number,headRefName \
             --jq '.[] | select(.headRefName | startswith("bot/staging-")) | .number' |
@@ -81,6 +94,7 @@ jobs:
           done
 
       - name: Open the PR and turn on auto-merge
+        if: steps.bump.outputs.changed == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
