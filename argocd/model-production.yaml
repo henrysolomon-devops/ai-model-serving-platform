@@ -1,0 +1,23 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: model-production
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/henrysolomon-devops/ai-model-serving-platform.git
+    targetRevision: main
+    path: helm/ai-model-serving
+    helm:
+      valueFiles:
+        - values-production.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: production
+  # Git is the source of truth: merged changes sync on their own,
+  # and manual edits on the cluster get reverted.
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

@@ -1,0 +1,23 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: model-staging
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/henrysolomon-devops/ai-model-serving-platform.git
+    targetRevision: main
+    path: helm/ai-model-serving
+    helm:
+      valueFiles:
+        - values-staging.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: staging
+  # Git is the source of truth: merged changes sync on their own,
+  # and manual edits on the cluster get reverted.
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
