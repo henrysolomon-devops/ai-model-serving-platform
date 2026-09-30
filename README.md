@@ -15,14 +15,15 @@ Each version of this project adds one thing that exists specifically because the
 - **Orchestration:** Kubernetes (k3s), Helm
 - **Model serving:** vLLM, Llama-3.2-3B-Instruct
 - **CI/CD:** GitHub Actions, OIDC (no stored AWS credentials)
+- **GitOps:** Argo CD
 - **App layer:** Flask (chat UI)
 
 ## Roadmap
 
 | Version | What it adds | Status |
 |---|---|---|
-| v1 | GPU Kubernetes cluster, vLLM model service, chat UI, manual apply/deploy/test | ✅ Done — [details](docs/v1-gpu-model-service.md) |
-| v2 | GitHub Actions CI, ArgoCD GitOps, automated smoke test gating promotion | Planned |
+| v1 | GPU Kubernetes cluster, vLLM model service, chat UI, manual apply/deploy/test | ✅ Done ([details](docs/v1-gpu-model-service.md)) |
+| v2 | GitHub Actions CI, Argo CD GitOps, automated smoke test gating promotion | ✅ Done ([details](docs/v2-cicd-gitops.md)) |
 | v3 | DCGM + Prometheus + Grafana for GPU/model observability | Planned |
 | v4 | KServe (RawDeployment mode), canary rollout with automated analysis | Planned |
 
