@@ -1,10 +1,9 @@
-# Helm values for the monitoring-stack Application. The resource limits are
-# starting points, to be checked against real usage on the cluster.
+# Values for the monitoring-stack app. The resource limits are starting points.
 
 prometheus:
   prometheusSpec:
-    # By default Prometheus ignores ServiceMonitors and rules from other
-    # namespaces. Ours live in staging and production.
+    # By default Prometheus only picks up ServiceMonitors and rules that
+    # carry this chart's release label. Ours don't.
     serviceMonitorSelectorNilUsesHelmValues: false
     serviceMonitorNamespaceSelector: {}
     ruleSelectorNilUsesHelmValues: false
@@ -61,7 +60,8 @@ alertmanager:
             title: "[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}"
             text: "{{ range .Alerts }}{{ .Annotations.description }}\n{{ end }}"
 
-# k3s runs these inside its own process, so their scrape targets would just sit red.
+# k3s runs these inside its own process, so their scrape targets would
+# just sit red.
 kubeScheduler:
   enabled: false
 kubeControllerManager:
@@ -113,7 +113,8 @@ grafana:
       org_role: Admin
     auth:
       disable_login_form: true
-  # Loki as a data source. The fixed uid keeps dashboard panels working after a rebuild.
+  # Loki as a data source. The fixed uid keeps dashboard panels working
+  # after a rebuild.
   additionalDataSources:
     - name: Loki
       type: loki
@@ -123,7 +124,7 @@ grafana:
   resources:
     requests:
       cpu: 100m
-      memory: 128Mi
+      memory: 256Mi
     limits:
       cpu: 200m
-      memory: 256Mi
+      memory: 512Mi
