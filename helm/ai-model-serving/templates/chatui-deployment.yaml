@@ -30,6 +30,16 @@ spec:
                 secretKeyRef:
                   name: api-key
                   key: API_KEY
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
           readinessProbe:
             httpGet:
               path: /health

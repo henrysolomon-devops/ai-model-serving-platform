@@ -3,11 +3,16 @@ kind: Service
 metadata:
   name: chat-ui
   namespace: {{ required "namespace must be set" .Values.namespace }}
+  # The ServiceMonitor in the monitoring setup finds this Service by label.
+  labels:
+    app: chat-ui
 spec:
   type: NodePort
   selector:
     app: chat-ui
   ports:
-    - port: {{ .Values.chatUI.port }}
+    # A named port, so the ServiceMonitor can refer to it by name.
+    - name: http
+      port: {{ .Values.chatUI.port }}
       targetPort: {{ .Values.chatUI.port }}
       nodePort: {{ required "chatUI.nodePort must be set" .Values.chatUI.nodePort }}

@@ -4,11 +4,16 @@ kind: Service
 metadata:
   name: model-service
   namespace: {{ required "namespace must be set" .Values.namespace }}
+  # The ServiceMonitor in the monitoring setup finds this Service by label.
+  labels:
+    app: model-service
 spec:
   type: NodePort
   selector:
     app: model-service
   ports:
-    - port: {{ .Values.model.port }}
+    # A named port, so the ServiceMonitor can refer to it by name.
+    - name: http
+      port: {{ .Values.model.port }}
       targetPort: {{ .Values.model.port }}
       nodePort: {{ required "model.nodePort must be set" .Values.model.nodePort }}

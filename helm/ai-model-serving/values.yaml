@@ -5,6 +5,9 @@ model:
     repository: ghcr.io/henrysolomon-devops/ai-model-serving-platform-model
   weightsBucket: ai-model-serving-platform-weights
   port: 8000
+  # RAM reserved for the model pod. A request, not a limit, so a slow cold
+  # start can't get OOM-killed. A starting guess, to be checked against real usage.
+  memoryRequest: 6Gi
 
 chatUI:
   image:
