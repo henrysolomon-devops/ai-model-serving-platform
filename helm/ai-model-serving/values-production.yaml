@@ -2,10 +2,10 @@ namespace: production
 
 model:
   image:
-    tag: "77bb063b3eeda37cfe4d18c5e12c0b5d4a60550e"
+    tag: "82c3da9c48c28f3c68521adbf1bab407f8e8ea2a"
   nodePort: 8012
 
 chatUI:
   image:
-    tag: "77bb063b3eeda37cfe4d18c5e12c0b5d4a60550e"
+    tag: "82c3da9c48c28f3c68521adbf1bab407f8e8ea2a"
   nodePort: 8002
