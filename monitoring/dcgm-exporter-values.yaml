@@ -5,5 +5,15 @@ serviceMonitor:
   # so a GPU's numbers show up under the environment that uses it.
   honorLabels: true
 
-# The default system-node-critical priority could let this pod push the model off a full node.
+# The default system-node-critical priority could let this pod push the
+# model off a full node.
 priorityClassName: ""
+
+# The chart's 512Mi limit is close to the 404Mi the exporter really uses.
+resources:
+  requests:
+    cpu: 100m
+    memory: 384Mi
+  limits:
+    cpu: 200m
+    memory: 768Mi
