@@ -237,7 +237,16 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "s"
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
         },
         "overrides": []
       },
@@ -713,7 +722,7 @@
             "uid": "${datasource}"
           },
           "expr": "DCGM_FI_DEV_GPU_UTIL{namespace=\"$environment\"}",
-          "legendFormat": "{{Hostname}}"
+          "legendFormat": "{{hostname}}"
         }
       ],
       "description": "Filled in once the model pod holds the GPU. Before that the GPU has no environment label.",
@@ -757,7 +766,7 @@
             "uid": "${datasource}"
           },
           "expr": "DCGM_FI_DEV_FB_USED{namespace=\"$environment\"}",
-          "legendFormat": "{{Hostname}}"
+          "legendFormat": "{{hostname}}"
         }
       ],
       "description": "vLLM reserves most of the GPU memory at startup, so this line stays flat.",
@@ -799,7 +808,7 @@
             "uid": "${datasource}"
           },
           "expr": "DCGM_FI_DEV_GPU_TEMP{namespace=\"$environment\"}",
-          "legendFormat": "{{Hostname}}"
+          "legendFormat": "{{hostname}}"
         }
       ],
       "fieldConfig": {
@@ -857,7 +866,7 @@
             "uid": "${datasource}"
           },
           "expr": "DCGM_FI_DEV_POWER_USAGE{namespace=\"$environment\"}",
-          "legendFormat": "{{Hostname}}"
+          "legendFormat": "{{hostname}}"
         }
       ],
       "fieldConfig": {
@@ -910,7 +919,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "{namespace=\"$environment\"}"
+          "expr": "{namespace=\"$environment\"} !~ \"GET /(health|metrics)\""
         }
       ],
       "options": {

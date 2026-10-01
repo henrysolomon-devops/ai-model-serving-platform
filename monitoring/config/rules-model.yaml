@@ -89,8 +89,8 @@ spec:
             team: model
             severity: warning
           annotations:
-            summary: "GPU running hot on {{ $labels.Hostname }}"
-            description: "The GPU on {{ $labels.Hostname }} has been above 85 C for 5 minutes."
+            summary: "GPU running hot on {{ $labels.hostname }}"
+            description: "The GPU on {{ $labels.hostname }} has been above 85 C for 5 minutes."
 
         - alert: ChatUiErrors
           expr: |
