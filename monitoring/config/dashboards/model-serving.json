@@ -722,7 +722,7 @@
             "uid": "${datasource}"
           },
           "expr": "DCGM_FI_DEV_GPU_UTIL{namespace=\"$environment\"}",
-          "legendFormat": "{{hostname}}"
+          "legendFormat": "{{hostname}} {{pod}}"
         }
       ],
       "description": "Filled in once the model pod holds the GPU. Before that the GPU has no environment label.",
@@ -766,7 +766,7 @@
             "uid": "${datasource}"
           },
           "expr": "DCGM_FI_DEV_FB_USED{namespace=\"$environment\"}",
-          "legendFormat": "{{hostname}}"
+          "legendFormat": "{{hostname}} {{pod}}"
         }
       ],
       "description": "vLLM reserves most of the GPU memory at startup, so this line stays flat.",
@@ -808,7 +808,7 @@
             "uid": "${datasource}"
           },
           "expr": "DCGM_FI_DEV_GPU_TEMP{namespace=\"$environment\"}",
-          "legendFormat": "{{hostname}}"
+          "legendFormat": "{{hostname}} {{pod}}"
         }
       ],
       "fieldConfig": {
@@ -866,7 +866,7 @@
             "uid": "${datasource}"
           },
           "expr": "DCGM_FI_DEV_POWER_USAGE{namespace=\"$environment\"}",
-          "legendFormat": "{{hostname}}"
+          "legendFormat": "{{hostname}} {{pod}}"
         }
       ],
       "fieldConfig": {
