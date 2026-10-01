@@ -113,6 +113,10 @@ grafana:
       org_role: Admin
     auth:
       disable_login_form: true
+  # Created by infra.yml. Without it the chart makes a new random password on
+  # every render, and Grafana restarts each time.
+  admin:
+    existingSecret: grafana-admin
   # Loki as a data source. The fixed uid keeps dashboard panels working
   # after a rebuild.
   additionalDataSources:
@@ -124,7 +128,7 @@ grafana:
   resources:
     requests:
       cpu: 100m
-      memory: 256Mi
+      memory: 384Mi
     limits:
       cpu: 200m
-      memory: 512Mi
+      memory: 1Gi
