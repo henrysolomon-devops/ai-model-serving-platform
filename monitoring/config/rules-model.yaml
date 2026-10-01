@@ -1,0 +1,107 @@
+# Model and GPU alerts, sent to #alerts-model.
+# The thresholds are starting points, tune them with real traffic.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: model-alerts
+  namespace: monitoring
+spec:
+  groups:
+    - name: model
+      rules:
+        # A cold start takes 10 to 20 minutes, so wait longer than that.
+        - alert: ModelNotAvailable
+          expr: kube_deployment_status_replicas_available{namespace=~"staging|production", deployment="model-service"} == 0
+          for: 25m
+          labels:
+            team: model
+            severity: critical
+          annotations:
+            summary: "Model is not available in {{ $labels.namespace }}"
+            description: "No model pod has been ready in {{ $labels.namespace }} for 25 minutes, longer than a cold start should take."
+
+        # The model pod is ready but Prometheus gets nothing from it. Without
+        # these, the rules below would go quiet instead of alerting.
+        - alert: ModelMetricsMissing
+          expr: |
+            kube_deployment_status_replicas_available{namespace=~"staging|production", deployment="model-service"} > 0
+              unless on (namespace)
+            up{job="model-service"} == 1
+          for: 10m
+          labels:
+            team: model
+            severity: warning
+          annotations:
+            summary: "No model metrics from {{ $labels.namespace }}"
+            description: "The model pod in {{ $labels.namespace }} is ready, but Prometheus has had no metrics from it for 10 minutes."
+
+        - alert: GpuMetricsMissing
+          expr: |
+            kube_deployment_status_replicas_available{namespace=~"staging|production", deployment="model-service"} > 0
+              unless on (namespace)
+            DCGM_FI_DEV_FB_USED
+          for: 10m
+          labels:
+            team: model
+            severity: warning
+          annotations:
+            summary: "No GPU metrics for {{ $labels.namespace }}"
+            description: "The model pod in {{ $labels.namespace }} is ready, but no GPU metrics are linked to it after 10 minutes."
+
+        - alert: ModelSlowResponses
+          expr: |
+            histogram_quantile(0.95,
+              sum by (le, namespace) (rate(vllm:e2e_request_latency_seconds_bucket{namespace=~"staging|production"}[5m]))
+            ) > 30
+          for: 10m
+          labels:
+            team: model
+            severity: warning
+          annotations:
+            summary: "Slow model responses in {{ $labels.namespace }}"
+            description: "The p95 time for the model to answer in {{ $labels.namespace }} has been above 30 seconds for 10 minutes."
+
+        - alert: ModelRequestsQueueing
+          expr: vllm:num_requests_waiting{namespace=~"staging|production"} > 5
+          for: 5m
+          labels:
+            team: model
+            severity: warning
+          annotations:
+            summary: "Requests are queueing in {{ $labels.namespace }}"
+            description: "More than 5 requests have been waiting for the model in {{ $labels.namespace }} for 5 minutes."
+
+        - alert: ModelCacheNearlyFull
+          expr: vllm:kv_cache_usage_perc{namespace=~"staging|production"} > 0.9
+          for: 10m
+          labels:
+            team: model
+            severity: warning
+          annotations:
+            summary: "Model KV cache almost full in {{ $labels.namespace }}"
+            description: "The KV cache in {{ $labels.namespace }} has been over 90% full for 10 minutes, so new requests will start to wait."
+
+        # No namespace filter: a hot GPU matters even when no pod uses it.
+        - alert: GpuTooHot
+          expr: DCGM_FI_DEV_GPU_TEMP > 85
+          for: 5m
+          labels:
+            team: model
+            severity: warning
+          annotations:
+            summary: "GPU running hot on {{ $labels.Hostname }}"
+            description: "The GPU on {{ $labels.Hostname }} has been above 85 C for 5 minutes."
+
+        - alert: ChatUiErrors
+          expr: |
+            sum by (namespace) (rate(chat_requests_total{status=~"5.."}[5m]))
+            /
+            sum by (namespace) (rate(chat_requests_total[5m]))
+            > 0.2
+          for: 5m
+          labels:
+            team: model
+            severity: warning
+          annotations:
+            summary: "Chat errors in {{ $labels.namespace }}"
+            description: "More than 20% of chat requests in {{ $labels.namespace }} have failed over the last 5 minutes."
