@@ -6,16 +6,16 @@ resource "aws_key_pair" "ai_model_serving" {
 }
 
 # Ships with the NVIDIA driver, Docker, and NVIDIA Container Toolkit
-# already installed. Always grab the latest one instead of hardcoding
-# an AMI ID, since the name carries a release date and a hardcoded ID
-# would go stale.
+# already installed. Pinned to the exact image the cluster was tested
+# with, so a new release can't change the driver between sessions. AWS
+# retires old images after a while, so refresh this name every few months.
 data "aws_ami" "deep_learning" {
   most_recent = true
   owners      = ["amazon"]
 
   filter {
     name   = "name"
-    values = ["Deep Learning Base OSS Nvidia Driver GPU AMI (Ubuntu 22.04)*"]
+    values = ["Deep Learning Base OSS Nvidia Driver GPU AMI (Ubuntu 22.04) 20260929"]
   }
   filter {
     name   = "virtualization-type"
