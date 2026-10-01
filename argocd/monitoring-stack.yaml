@@ -1,0 +1,38 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monitoring-stack
+  namespace: argocd
+spec:
+  project: default
+  sources:
+    # The chart itself, pinned, from the prometheus-community Helm repo.
+    - repoURL: https://prometheus-community.github.io/helm-charts
+      chart: kube-prometheus-stack
+      targetRevision: 91.4.1
+      helm:
+        # Keeps the Service names predictable.
+        releaseName: monitoring
+        valueFiles:
+          - $values/monitoring/kube-prometheus-stack-values.yaml
+    # This repo, only used to read the values file above.
+    - repoURL: https://github.com/henrysolomon-devops/ai-model-serving-platform.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      # Some of this chart's CRDs are too big for a normal client-side apply.
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 10m

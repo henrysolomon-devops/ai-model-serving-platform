@@ -20,7 +20,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" \
     && unzip awscliv2.zip && ./aws/install && rm -rf awscliv2.zip aws
 
-RUN pip3 install --no-cache-dir vllm "huggingface_hub[cli]"
+# Both packages are pinned to the versions that were running on the live
+# cluster when v2 was tested. vLLM renames its Prometheus metrics between
+# releases, so an unpinned install could quietly break the v3 dashboard and
+# alert rules on the next build. vLLM pins its own torch build, so torch
+# does not need a line here. huggingface_hub 1.x ships the hf command in
+# the base package, there is no [cli] extra anymore.
+RUN pip3 install --no-cache-dir "vllm==0.30.0" "huggingface_hub==1.33.0"
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

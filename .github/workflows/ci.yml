@@ -1,7 +1,7 @@
 name: CI
 
-# Runners have no GPU, so this only checks contracts: the chat proxy's
-# behavior against a fake model backend, the Helm chart, and the scripts.
+# Runners have no GPU, so this only checks contracts: the chat proxy against
+# a fake model backend, the Helm chart, the alert rules and the scripts.
 on:
   pull_request:
     branches: [main]
@@ -54,5 +54,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install promtool
+        run: |
+          mkdir -p "$HOME/bin"
+          curl -sSL https://github.com/prometheus/prometheus/releases/download/v3.14.0/prometheus-3.14.0.linux-amd64.tar.gz \
+            | tar xz -C "$HOME/bin" --strip-components=1 prometheus-3.14.0.linux-amd64/promtool
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+
+      - name: Check the alert rules and the dashboard JSON
+        run: |
+          pip install pyyaml
+          bash test/check-rules.sh
+          python3 -m json.tool monitoring/config/dashboards/model-serving.json > /dev/null
+
       - name: Shellcheck
-        run: shellcheck model-service/entrypoint.sh test/smoke-test.sh ansible/deploy-k3s.sh
+        run: |
+          shellcheck model-service/entrypoint.sh ansible/deploy-k3s.sh \
+            test/smoke-test.sh test/check-rules.sh test/metrics-check.sh

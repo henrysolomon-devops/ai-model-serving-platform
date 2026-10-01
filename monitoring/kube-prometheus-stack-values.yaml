@@ -1,0 +1,129 @@
+# Helm values for the monitoring-stack Application. The resource limits are
+# starting points, to be checked against real usage on the cluster.
+
+prometheus:
+  prometheusSpec:
+    # By default Prometheus ignores ServiceMonitors and rules from other
+    # namespaces. Ours live in staging and production.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorNamespaceSelector: {}
+    ruleSelectorNilUsesHelmValues: false
+    ruleNamespaceSelector: {}
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
+
+alertmanager:
+  enabled: true
+  alertmanagerSpec:
+    # The Slack webhook URLs, from a Secret that infra.yml creates.
+    secrets:
+      - alertmanager-slack-webhooks
+    resources:
+      requests:
+        cpu: 25m
+        memory: 32Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
+  config:
+    route:
+      # One message per alert name and namespace.
+      group_by: ["alertname", "namespace"]
+      # Alerts without a team label go nowhere. That keeps the chart's own
+      # alerts out of Slack.
+      receiver: "null"
+      routes:
+        - matchers: ['alertname = "Watchdog"']
+          receiver: "null"
+        - matchers: ['team = "infra"']
+          receiver: slack-infra
+        - matchers: ['team = "model"']
+          receiver: slack-model
+    receivers:
+      - name: "null"
+      - name: slack-infra
+        slack_configs:
+          - api_url_file: /etc/alertmanager/secrets/alertmanager-slack-webhooks/infra
+            channel: "#alerts-infra"
+            send_resolved: true
+            title: "[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}"
+            text: "{{ range .Alerts }}{{ .Annotations.description }}\n{{ end }}"
+      - name: slack-model
+        slack_configs:
+          - api_url_file: /etc/alertmanager/secrets/alertmanager-slack-webhooks/model
+            channel: "#alerts-model"
+            send_resolved: true
+            title: "[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}"
+            text: "{{ range .Alerts }}{{ .Annotations.description }}\n{{ end }}"
+
+# k3s runs these inside its own process, so their scrape targets would just sit red.
+kubeScheduler:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+kubeEtcd:
+  enabled: false
+kubeProxy:
+  enabled: false
+
+prometheusOperator:
+  # The admission webhook needs a Helm hook job that fights with Argo CD.
+  # The operator's TLS secret comes from that same job, so TLS goes off too.
+  admissionWebhooks:
+    enabled: false
+  tls:
+    enabled: false
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+kube-state-metrics:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+prometheus-node-exporter:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 64Mi
+
+grafana:
+  # No login screen. Grafana is only reachable through port-forward, which
+  # already needs the cluster's kubeconfig.
+  grafana.ini:
+    auth.anonymous:
+      enabled: true
+      org_role: Admin
+    auth:
+      disable_login_form: true
+  # Loki as a data source. The fixed uid keeps dashboard panels working after a rebuild.
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      access: proxy
+      url: http://loki.monitoring.svc.cluster.local:3100
+      uid: loki
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi

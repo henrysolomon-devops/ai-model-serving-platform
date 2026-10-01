@@ -1,0 +1,30 @@
+# Unit tests for rules-infra.yaml.
+rule_files:
+  - rules-infra.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # A pod restarting in production alerts. A steady pod in staging and a
+  # noisy pod in kube-system do not.
+  - interval: 1m
+    input_series:
+      - series: 'kube_pod_container_status_restarts_total{namespace="production", pod="model-service-abc", container="model-service"}'
+        values: '0+1x40'
+      - series: 'kube_pod_container_status_restarts_total{namespace="staging", pod="chat-ui-xyz", container="chat-ui"}'
+        values: '2x40'
+      - series: 'kube_pod_container_status_restarts_total{namespace="kube-system", pod="noisy", container="noisy"}'
+        values: '0+1x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: PodCrashLooping
+        exp_alerts:
+          - exp_labels:
+              namespace: production
+              pod: model-service-abc
+              container: model-service
+              team: infra
+              severity: warning
+            exp_annotations:
+              summary: "Pod production/model-service-abc is crash looping"
+              description: "Container model-service in production/model-service-abc restarted more than 3 times in the last 15 minutes."

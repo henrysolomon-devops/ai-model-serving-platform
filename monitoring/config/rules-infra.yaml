@@ -1,0 +1,50 @@
+# Cluster level alerts. The team label sends them to #alerts-infra.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: infra-alerts
+  namespace: monitoring
+spec:
+  groups:
+    - name: infra
+      rules:
+        - alert: NodeDiskPressure
+          expr: kube_node_status_condition{condition="DiskPressure", status="true"} == 1
+          for: 5m
+          labels:
+            team: infra
+            severity: critical
+          annotations:
+            summary: "Disk pressure on {{ $labels.node }}"
+            description: "Node {{ $labels.node }} has reported DiskPressure for 5 minutes. Pods may start getting evicted."
+
+        - alert: NodeMemoryPressure
+          expr: kube_node_status_condition{condition="MemoryPressure", status="true"} == 1
+          for: 5m
+          labels:
+            team: infra
+            severity: critical
+          annotations:
+            summary: "Memory pressure on {{ $labels.node }}"
+            description: "Node {{ $labels.node }} has reported MemoryPressure for 5 minutes."
+
+        # More than 3 restarts in 15 minutes is a crash loop, not a rollout.
+        - alert: PodCrashLooping
+          expr: increase(kube_pod_container_status_restarts_total{namespace=~"staging|production|monitoring"}[15m]) > 3
+          for: 5m
+          labels:
+            team: infra
+            severity: warning
+          annotations:
+            summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} is crash looping"
+            description: "Container {{ $labels.container }} in {{ $labels.namespace }}/{{ $labels.pod }} restarted more than 3 times in the last 15 minutes."
+
+        - alert: PodNotReady
+          expr: kube_pod_status_phase{namespace=~"staging|production|monitoring", phase=~"Failed|Unknown"} == 1
+          for: 10m
+          labels:
+            team: infra
+            severity: warning
+          annotations:
+            summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} is not healthy"
+            description: "Pod {{ $labels.namespace }}/{{ $labels.pod }} has been in phase {{ $labels.phase }} for over 10 minutes."

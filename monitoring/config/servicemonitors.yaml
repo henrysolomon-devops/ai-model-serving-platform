@@ -1,0 +1,37 @@
+# Tell Prometheus where the model and the chat UI publish their metrics.
+# Both Services have a port named http, and both serve /metrics on it.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: model-service
+  namespace: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: model-service
+  namespaceSelector:
+    matchNames:
+      - staging
+      - production
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: chat-ui
+  namespace: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: chat-ui
+  namespaceSelector:
+    matchNames:
+      - staging
+      - production
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s

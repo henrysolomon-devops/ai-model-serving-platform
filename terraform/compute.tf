@@ -38,6 +38,12 @@ resource "aws_instance" "control_plane" {
   # it's a stable one-time role like the GitHub OIDC role.
   iam_instance_profile = "ai-model-serving-ec2-weights-access"
 
+  # Lets pods reach the instance credentials. With the default of 1 the
+  # extra network hop inside a pod is blocked, and Loki cannot get into S3.
+  metadata_options {
+    http_put_response_hop_limit = 2
+  }
+
   # The Deep Learning AMI ships with a large preinstalled toolset, so
   # the root volume needs more room than the 8GB default.
   root_block_device {
@@ -57,6 +63,10 @@ resource "aws_instance" "worker" {
   vpc_security_group_ids = [aws_security_group.server.id]
   key_name               = aws_key_pair.ai_model_serving.key_name
   iam_instance_profile   = "ai-model-serving-ec2-weights-access"
+
+  metadata_options {
+    http_put_response_hop_limit = 2
+  }
 
   root_block_device {
     volume_size = 100

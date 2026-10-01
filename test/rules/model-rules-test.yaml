@@ -1,0 +1,139 @@
+# Unit tests for rules-model.yaml. Run them with test/check-rules.sh.
+rule_files:
+  - rules-model.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # A cold start may take a while. Only 25 minutes without a model is a problem.
+  - interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="staging", deployment="model-service"}'
+        values: '0x40'
+      - series: 'kube_deployment_status_replicas_available{namespace="production", deployment="model-service"}'
+        values: '0x15 1x25'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: ModelNotAvailable
+        exp_alerts: []
+      - eval_time: 27m
+        alertname: ModelNotAvailable
+        exp_alerts:
+          - exp_labels:
+              namespace: staging
+              deployment: model-service
+              team: model
+              severity: critical
+            exp_annotations:
+              summary: "Model is not available in staging"
+              description: "No model pod has been ready in staging for 25 minutes, longer than a cold start should take."
+
+  # Staging is ready but has no scrape target, production is healthy.
+  - interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="staging", deployment="model-service"}'
+        values: '1x40'
+      - series: 'kube_deployment_status_replicas_available{namespace="production", deployment="model-service"}'
+        values: '1x40'
+      - series: 'up{job="model-service", namespace="production"}'
+        values: '1x40'
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: ModelMetricsMissing
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: ModelMetricsMissing
+        exp_alerts:
+          - exp_labels:
+              namespace: staging
+              deployment: model-service
+              team: model
+              severity: warning
+            exp_annotations:
+              summary: "No model metrics from staging"
+              description: "The model pod in staging is ready, but Prometheus has had no metrics from it for 10 minutes."
+
+  # The target exists but every scrape fails.
+  - interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="production", deployment="model-service"}'
+        values: '1x40'
+      - series: 'up{job="model-service", namespace="production"}'
+        values: '0x40'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: ModelMetricsMissing
+        exp_alerts:
+          - exp_labels:
+              namespace: production
+              deployment: model-service
+              team: model
+              severity: warning
+            exp_annotations:
+              summary: "No model metrics from production"
+              description: "The model pod in production is ready, but Prometheus has had no metrics from it for 10 minutes."
+
+  # A cold start has no ready pod yet, so neither missing-data alert may fire.
+  - interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="staging", deployment="model-service"}'
+        values: '0x40'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: ModelMetricsMissing
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: GpuMetricsMissing
+        exp_alerts: []
+
+  # Staging has GPU metrics linked to its pod. In production the GPU is
+  # only seen under the monitoring namespace, so it is not linked.
+  - interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="staging", deployment="model-service"}'
+        values: '1x40'
+      - series: 'kube_deployment_status_replicas_available{namespace="production", deployment="model-service"}'
+        values: '1x40'
+      - series: 'DCGM_FI_DEV_FB_USED{namespace="staging", Hostname="node-a", gpu="0"}'
+        values: '13500x40'
+      - series: 'DCGM_FI_DEV_FB_USED{namespace="monitoring", Hostname="node-b", gpu="0"}'
+        values: '13500x40'
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: GpuMetricsMissing
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: GpuMetricsMissing
+        exp_alerts:
+          - exp_labels:
+              namespace: production
+              deployment: model-service
+              team: model
+              severity: warning
+            exp_annotations:
+              summary: "No GPU metrics for production"
+              description: "The model pod in production is ready, but no GPU metrics are linked to it after 10 minutes."
+
+  # Half of the chat requests in staging fail, production has no failures.
+  - interval: 1m
+    input_series:
+      - series: 'chat_requests_total{namespace="staging", status="200"}'
+        values: '0+5x40'
+      - series: 'chat_requests_total{namespace="staging", status="502"}'
+        values: '0+5x40'
+      - series: 'chat_requests_total{namespace="production", status="200"}'
+        values: '0+5x40'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: ChatUiErrors
+        exp_alerts: []
+      - eval_time: 9m
+        alertname: ChatUiErrors
+        exp_alerts:
+          - exp_labels:
+              namespace: staging
+              team: model
+              severity: warning
+            exp_annotations:
+              summary: "Chat errors in staging"
+              description: "More than 20% of chat requests in staging have failed over the last 5 minutes."
