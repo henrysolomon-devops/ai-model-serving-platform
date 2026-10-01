@@ -3,30 +3,51 @@
 # from a previous run, otherwise downloads it from Hugging Face (using
 # a gated-model token) and uploads it to S3 so the next run skips the
 # download entirely. Then hands off to vLLM to actually serve it.
+#
+# A cold start can take ten minutes or more and used to be silent. Every
+# step below now logs a timestamp and how long it took, so the log panel
+# in Grafana shows where a slow start is spending its time.
 set -euo pipefail
 
 MODEL_ID="meta-llama/Llama-3.2-3B-Instruct"
 MODEL_DIR="/models/Llama-3.2-3B-Instruct"
 S3_PREFIX="s3://${WEIGHTS_BUCKET}/Llama-3.2-3B-Instruct/"
 
+# Plain text only: a UTC time and a message. Never print the tokens or
+# keys this script is given.
+log() {
+  printf '[entrypoint %s] %s\n' "$(date -u +%H:%M:%S)" "$*"
+}
+
+START=$SECONDS
+log "Starting up. Model: ${MODEL_ID}, weights bucket: ${WEIGHTS_BUCKET}"
+
 mkdir -p "${MODEL_DIR}"
 
 if [ ! -f "${MODEL_DIR}/config.json" ]; then
-  echo "Not on local disk, checking the S3 cache..."
+  log "Weights are not on local disk, checking the S3 cache..."
+  step=$SECONDS
   aws s3 sync "${S3_PREFIX}" "${MODEL_DIR}" --only-show-errors || true
+  log "S3 cache check finished in $((SECONDS - step))s."
 fi
 
 if [ ! -f "${MODEL_DIR}/config.json" ]; then
-  echo "Not cached in S3 either, downloading from Hugging Face..."
+  log "Not cached in S3 either, downloading from Hugging Face..."
+  step=$SECONDS
   hf download "${MODEL_ID}" \
     --local-dir "${MODEL_DIR}" \
     --token "${HF_TOKEN}"
+  log "Hugging Face download finished in $((SECONDS - step))s."
 
-  echo "Caching this download to S3 so the next run doesn't repeat it..."
+  log "Caching this download to S3 so the next run doesn't repeat it..."
+  step=$SECONDS
   aws s3 sync "${MODEL_DIR}" "${S3_PREFIX}" --only-show-errors
+  log "Upload to S3 finished in $((SECONDS - step))s."
 else
-  echo "Using weights already present (local disk or S3 cache)."
+  log "Using weights already present (local disk or S3 cache)."
 fi
+
+log "Weights are ready after $((SECONDS - START))s. Handing off to vLLM, which still has to load the model and compile kernels."
 
 # --gpu-memory-utilization and --max-model-len are tuned for a single
 # T4's 16GB, not for the full model default, since every environment
