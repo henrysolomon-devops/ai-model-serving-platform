@@ -111,11 +111,17 @@ jobs:
             | sed -E 's|https://([^:]+):.*|\1|')
           echo "ip=$ip" >> "$GITHUB_OUTPUT"
 
+      - name: Note the request count before the prompt
+        run: bash test/metrics-check.sh before staging "$RUNNER_TEMP/metrics-before"
+
       - name: Run the smoke test
         env:
           API_KEY: ${{ secrets.API_KEY }}
           SERVER_IP: ${{ steps.rollout.outputs.ip }}
         run: bash test/smoke-test.sh staging "$SERVER_IP" "$API_KEY"
+
+      - name: Check the metrics after the prompt
+        run: bash test/metrics-check.sh after staging "$RUNNER_TEMP/metrics-before"
 
       - name: Close the temporary access
         if: always()
