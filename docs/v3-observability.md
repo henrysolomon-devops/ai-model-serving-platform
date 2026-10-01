@@ -208,7 +208,7 @@ Peak memory per container over the two hour session:
 
 ## Problems found and fixed
 
-- **Grafana ran out of memory twice.** The 256Mi limit came over from the first project and was too small for this dashboard. At 512Mi it was killed again under load (two tabs refreshing every 30 seconds, plus Explore). Its peak hit the limit, so the real peak is unknown, and the limit is still 512Mi.
+- **Grafana ran out of memory twice.** The 256Mi limit came over from the first project and was too small for this dashboard. At 512Mi it was killed again under load (two tabs refreshing every 30 seconds, plus Explore). Its peak hit the limit, so the real peak is unknown. The limit was raised to 1Gi after the session.
 - **DCGM's memory limit was too close.** The chart default is 512Mi and the exporter uses about 410, so the limit is now 768Mi.
 
 ## Trade-offs and limits
