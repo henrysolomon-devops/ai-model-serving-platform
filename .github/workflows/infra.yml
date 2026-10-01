@@ -172,6 +172,18 @@ jobs:
             --from-literal=model="$SLACK_WEBHOOK_MODEL" \
             -n monitoring --dry-run=client -o yaml | kubectl apply -f -
 
+      # Grafana reads its admin login from this Secret, so the password stays the same between renders.
+      - name: Create the Grafana admin secret
+        if: inputs.action == 'apply'
+        run: |
+          export KUBECONFIG=~/.kube/ai-model-serving-config
+          PASSWORD="$(openssl rand -base64 24)"
+          echo "::add-mask::$PASSWORD"
+          kubectl create secret generic grafana-admin \
+            --from-literal=admin-user=admin \
+            --from-literal=admin-password="$PASSWORD" \
+            -n monitoring --dry-run=client -o yaml | kubectl apply -f -
+
       # Server-side apply is required, some Argo CD CRDs are too big for client-side.
       - name: Install Argo CD
         if: inputs.action == 'apply'
