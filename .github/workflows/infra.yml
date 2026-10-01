@@ -41,6 +41,20 @@ jobs:
       - name: Check out the repo
         uses: actions/checkout@v4
 
+      # Checked first, so a missing secret fails before any GPU node exists.
+      - name: Make sure the Slack webhook secrets are set
+        if: inputs.action == 'apply'
+        env:
+          SLACK_WEBHOOK_INFRA: ${{ secrets.SLACK_WEBHOOK_INFRA }}
+          SLACK_WEBHOOK_MODEL: ${{ secrets.SLACK_WEBHOOK_MODEL }}
+        run: |
+          for name in SLACK_WEBHOOK_INFRA SLACK_WEBHOOK_MODEL; do
+            if [ -z "${!name}" ]; then
+              echo "::error::The $name repository secret is empty. Add it before applying."
+              exit 1
+            fi
+          done
+
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
         with:
@@ -143,6 +157,20 @@ jobs:
             kubectl create secret generic api-key --from-literal=API_KEY="$API_KEY" \
               -n "$ns" --dry-run=client -o yaml | kubectl apply -f -
           done
+
+      # Alertmanager reads the Slack webhook URLs from this Secret, so they stay out of git.
+      - name: Create the Slack webhook secret for Alertmanager
+        if: inputs.action == 'apply'
+        env:
+          SLACK_WEBHOOK_INFRA: ${{ secrets.SLACK_WEBHOOK_INFRA }}
+          SLACK_WEBHOOK_MODEL: ${{ secrets.SLACK_WEBHOOK_MODEL }}
+        run: |
+          export KUBECONFIG=~/.kube/ai-model-serving-config
+          kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create secret generic alertmanager-slack-webhooks \
+            --from-literal=infra="$SLACK_WEBHOOK_INFRA" \
+            --from-literal=model="$SLACK_WEBHOOK_MODEL" \
+            -n monitoring --dry-run=client -o yaml | kubectl apply -f -
 
       # Server-side apply is required, some Argo CD CRDs are too big for client-side.
       - name: Install Argo CD
