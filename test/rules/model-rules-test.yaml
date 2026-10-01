@@ -94,9 +94,9 @@ tests:
         values: '1x40'
       - series: 'kube_deployment_status_replicas_available{namespace="production", deployment="model-service"}'
         values: '1x40'
-      - series: 'DCGM_FI_DEV_FB_USED{namespace="staging", Hostname="node-a", gpu="0"}'
+      - series: 'DCGM_FI_DEV_FB_USED{namespace="staging", hostname="node-a", gpu="0"}'
         values: '13500x40'
-      - series: 'DCGM_FI_DEV_FB_USED{namespace="monitoring", Hostname="node-b", gpu="0"}'
+      - series: 'DCGM_FI_DEV_FB_USED{namespace="monitoring", hostname="node-b", gpu="0"}'
         values: '13500x40'
     alert_rule_test:
       - eval_time: 8m
