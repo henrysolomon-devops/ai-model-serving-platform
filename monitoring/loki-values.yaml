@@ -1,0 +1,74 @@
+# One Loki pod, keeping its logs in S3. The bucket is created by hand,
+# outside Terraform, so logs survive a destroy and apply cycle.
+deploymentMode: Monolithic
+
+loki:
+  # No login in front of Loki. It is only reachable inside the cluster.
+  auth_enabled: false
+
+  commonConfig:
+    replication_factor: 1
+
+  # Tells Loki how to index. TSDB with schema v13 is the current default
+  # for new installs. The date only has to be in the past.
+  schemaConfig:
+    configs:
+      - from: "2024-01-01"
+        store: tsdb
+        object_store: s3
+        schema: v13
+        index:
+          prefix: loki_index_
+          period: 24h
+
+  # No keys here. Loki picks up the EC2 instance profile on its own.
+  storage:
+    type: s3
+    bucketNames:
+      chunks: ai-model-serving-platform-loki-logs
+      ruler: ai-model-serving-platform-loki-logs
+    s3:
+      region: us-east-1
+
+  # Matches the 14 day expiry rule on the bucket.
+  limits_config:
+    retention_period: 336h
+  compactor:
+    retention_enabled: true
+    delete_request_store: s3
+
+singleBinary:
+  replicas: 1
+  # Nothing local is worth keeping, S3 has the data.
+  persistence:
+    enabled: false
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# The chart defaults to 3 replicas for these. Only one mode may run.
+read:
+  replicas: 0
+write:
+  replicas: 0
+backend:
+  replicas: 0
+
+# Switched on by default, none of it is needed for one small pod.
+gateway:
+  enabled: false
+chunksCache:
+  enabled: false
+resultsCache:
+  enabled: false
+lokiCanary:
+  enabled: false
+test:
+  enabled: false
+sidecar:
+  rules:
+    enabled: false

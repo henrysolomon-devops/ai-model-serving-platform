@@ -1,0 +1,36 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: dcgm-exporter
+  namespace: argocd
+spec:
+  project: default
+  sources:
+    - repoURL: https://nvidia.github.io/dcgm-exporter/helm-charts
+      chart: dcgm-exporter
+      targetRevision: 4.8.4
+      helm:
+        valueFiles:
+          - $values/monitoring/dcgm-exporter-values.yaml
+    # This repo, only used to read the values file above.
+    - repoURL: https://github.com/henrysolomon-devops/ai-model-serving-platform.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      # The ServiceMonitor CRD comes from the monitoring-stack app, which may
+      # not be ready yet on a fresh cluster. Retry until it is.
+      - SkipDryRunOnMissingResource=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 10m

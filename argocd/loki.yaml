@@ -1,0 +1,32 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: loki
+  namespace: argocd
+spec:
+  project: default
+  sources:
+    # The open source Loki chart now lives in grafana-community. The older
+    # grafana/loki chart repo only carries the Enterprise Logs chart.
+    - repoURL: https://grafana-community.github.io/helm-charts
+      chart: loki
+      targetRevision: 18.13.3
+      helm:
+        # Alloy and Grafana reach Loki at loki.monitoring.svc, so the
+        # release name has to stay "loki".
+        releaseName: loki
+        valueFiles:
+          - $values/monitoring/loki-values.yaml
+    # This repo, only used to read the values file above.
+    - repoURL: https://github.com/henrysolomon-devops/ai-model-serving-platform.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

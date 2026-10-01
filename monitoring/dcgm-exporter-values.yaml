@@ -1,0 +1,9 @@
+# Everything not listed here stays at the chart's defaults.
+
+serviceMonitor:
+  # Keep the pod and namespace labels the exporter puts on each GPU metric,
+  # so a GPU's numbers show up under the environment that uses it.
+  honorLabels: true
+
+# The default system-node-critical priority could let this pod push the model off a full node.
+priorityClassName: ""
