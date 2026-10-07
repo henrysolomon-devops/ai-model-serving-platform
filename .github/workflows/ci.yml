@@ -119,4 +119,4 @@ jobs:
       - name: Shellcheck
         run: |
           shellcheck model-service/entrypoint.sh ansible/deploy-k3s.sh \
-            test/smoke-test.sh test/check-rules.sh test/metrics-check.sh
+            test/smoke-test.sh test/check-rules.sh test/metrics-check.sh test/canary-check.sh
