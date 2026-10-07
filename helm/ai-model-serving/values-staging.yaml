@@ -3,7 +3,6 @@ namespace: staging
 model:
   image:
     tag: "82c3da9c48c28f3c68521adbf1bab407f8e8ea2a"
-  nodePort: 8011
 
 chatUI:
   image:

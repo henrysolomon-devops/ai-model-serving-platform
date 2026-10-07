@@ -1,0 +1,11 @@
+{{- if .Values.canary.enabled }}
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: model-service-canary
+  namespace: {{ required "namespace must be set" .Values.namespace }}
+  annotations:
+    serving.kserve.io/deploymentMode: Standard
+spec:
+{{- template "model.predictor" (dict "root" . "tag" (required "canary.image.tag must be set when the canary is on" .Values.canary.image.tag) "nodeEnvironment" .Values.canary.nodeEnvironment) }}
+{{- end }}

@@ -1,13 +1,13 @@
 {
   "title": "AI Model Serving",
   "uid": "ai-model-serving",
-  "description": "Chat UI, the vLLM model and its GPU, for staging and production.",
+  "description": "Chat UI, the vLLM model and its GPU, for staging and production. In production a canary shows up next to the stable model during a release.",
   "tags": [
     "ai-model-serving"
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "refresh": "30s",
   "time": {
     "from": "now-1h",
@@ -78,7 +78,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(kube_deployment_status_replicas_available{namespace=\"$environment\", deployment=\"model-service\"})"
+          "expr": "sum by (deployment) (kube_deployment_status_replicas_available{namespace=\"$environment\", deployment=~\"model-service-predictor|model-service-canary-predictor\"})",
+          "legendFormat": "{{deployment}}"
         }
       ],
       "fieldConfig": {
@@ -232,7 +233,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "max(kube_pod_status_ready_time{namespace=\"$environment\", pod=~\"model-service-.*\"} - on (namespace, pod) kube_pod_start_time{namespace=\"$environment\", pod=~\"model-service-.*\"})"
+          "expr": "max(kube_pod_status_ready_time{namespace=\"$environment\", pod=~\"model-service-predictor-.*\"} - on (namespace, pod) kube_pod_start_time{namespace=\"$environment\", pod=~\"model-service-predictor-.*\"})"
         }
       ],
       "fieldConfig": {
@@ -439,8 +440,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(vllm:num_requests_running{namespace=\"$environment\"})",
-          "legendFormat": "running"
+          "expr": "sum by (deployment) (vllm:num_requests_running{namespace=\"$environment\"})",
+          "legendFormat": "running {{deployment}}"
         },
         {
           "refId": "B",
@@ -448,8 +449,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(vllm:num_requests_waiting{namespace=\"$environment\"})",
-          "legendFormat": "waiting"
+          "expr": "sum by (deployment) (vllm:num_requests_waiting{namespace=\"$environment\"})",
+          "legendFormat": "waiting {{deployment}}"
         }
       ],
       "fieldConfig": {
@@ -487,8 +488,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:e2e_request_latency_seconds_bucket{namespace=\"$environment\"}[5m])))",
-          "legendFormat": "whole answer"
+          "expr": "histogram_quantile(0.95, sum by (le, deployment) (rate(vllm:e2e_request_latency_seconds_bucket{namespace=\"$environment\"}[5m])))",
+          "legendFormat": "whole answer {{deployment}}"
         },
         {
           "refId": "B",
@@ -496,8 +497,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket{namespace=\"$environment\"}[5m])))",
-          "legendFormat": "first token"
+          "expr": "histogram_quantile(0.95, sum by (le, deployment) (rate(vllm:time_to_first_token_seconds_bucket{namespace=\"$environment\"}[5m])))",
+          "legendFormat": "first token {{deployment}}"
         }
       ],
       "fieldConfig": {
@@ -537,8 +538,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(rate(vllm:prompt_tokens_total{namespace=\"$environment\"}[5m]))",
-          "legendFormat": "prompt"
+          "expr": "sum by (deployment) (rate(vllm:prompt_tokens_total{namespace=\"$environment\"}[5m]))",
+          "legendFormat": "prompt {{deployment}}"
         },
         {
           "refId": "B",
@@ -546,8 +547,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(rate(vllm:generation_tokens_total{namespace=\"$environment\"}[5m]))",
-          "legendFormat": "generated"
+          "expr": "sum by (deployment) (rate(vllm:generation_tokens_total{namespace=\"$environment\"}[5m]))",
+          "legendFormat": "generated {{deployment}}"
         }
       ],
       "fieldConfig": {
@@ -585,8 +586,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "max(vllm:kv_cache_usage_perc{namespace=\"$environment\"})",
-          "legendFormat": "used"
+          "expr": "max by (deployment) (vllm:kv_cache_usage_perc{namespace=\"$environment\"})",
+          "legendFormat": "{{deployment}}"
         }
       ],
       "fieldConfig": {
@@ -628,8 +629,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (finished_reason) (rate(vllm:request_success_total{namespace=\"$environment\"}[5m]))",
-          "legendFormat": "{{finished_reason}}"
+          "expr": "sum by (finished_reason, deployment) (rate(vllm:request_success_total{namespace=\"$environment\"}[5m]))",
+          "legendFormat": "{{finished_reason}} {{deployment}}"
         }
       ],
       "fieldConfig": {

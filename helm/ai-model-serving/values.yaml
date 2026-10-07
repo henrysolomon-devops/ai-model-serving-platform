@@ -8,8 +8,29 @@ model:
   # RAM reserved for the model pod. A request, not a limit, so a slow cold
   # start can't get OOM-killed. A starting guess, to be checked against real usage.
   memoryRequest: 6Gi
+  cpuRequest: 500m
+  # KServe adds a 2Gi memory and 1 CPU limit when none is set, which would
+  # kill vLLM. These are set well above real use, so they never bite.
+  memoryLimit: 14Gi
+  cpuLimit: "4"
 
 chatUI:
   image:
     repository: ghcr.io/henrysolomon-devops/ai-model-serving-platform-chat-ui
   port: 5000
+
+# A second copy of the model for a release. Only production uses it, and
+# values-production-canary.yaml is the file that switches it on.
+canary:
+  enabled: false
+  # Share of production traffic, 0 to 100.
+  weight: 0
+  # The node the canary runs on, labelled by Ansible.
+  nodeEnvironment: canary
+  image:
+    tag: ""
+
+# The in-cluster address of the gateway. The Service name is fixed in
+# platform/gateway/gateway.yaml.
+gateway:
+  host: model-gateway.envoy-gateway-system.svc.cluster.local

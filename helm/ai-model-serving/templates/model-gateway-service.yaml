@@ -1,0 +1,10 @@
+# Gives the chat UI a stable name for the gateway. The request keeps this
+# Service's name as its Host header, which is what the route above matches.
+apiVersion: v1
+kind: Service
+metadata:
+  name: model-service
+  namespace: {{ required "namespace must be set" .Values.namespace }}
+spec:
+  type: ExternalName
+  externalName: {{ .Values.gateway.host }}

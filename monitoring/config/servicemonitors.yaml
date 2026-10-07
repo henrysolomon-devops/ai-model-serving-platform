@@ -1,14 +1,18 @@
 # Tell Prometheus where the model and the chat UI publish their metrics.
-# Both Services have a port named http, and both serve /metrics on it.
+# KServe makes one Service per model, named <model>-predictor with a port
+# called http. The chat UI Service has an http port too. Both serve /metrics.
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   name: model-service
   namespace: monitoring
 spec:
+  # KServe labels each of its Services with the model's name, so this finds
+  # the stable model and, during a release, the canary.
   selector:
-    matchLabels:
-      app: model-service
+    matchExpressions:
+      - key: serving.kserve.io/inferenceservice
+        operator: Exists
   namespaceSelector:
     matchNames:
       - staging
@@ -17,6 +21,13 @@ spec:
     - port: http
       path: /metrics
       interval: 15s
+      relabelings:
+        # The alerts and the dashboard expect job="model-service".
+        - targetLabel: job
+          replacement: model-service
+        # Tells the stable model from the canary, which share a namespace.
+        - sourceLabels: [__meta_kubernetes_service_name]
+          targetLabel: deployment
 ---
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor

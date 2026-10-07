@@ -22,9 +22,9 @@ spec:
           ports:
             - containerPort: {{ .Values.chatUI.port }}
           env:
-            # Internal cluster DNS, so this traffic never leaves the cluster.
+            # Goes through the gateway, which picks the stable model or the canary.
             - name: MODEL_API_URL
-              value: "http://model-service.{{ .Values.namespace }}.svc.cluster.local:{{ .Values.model.port }}/v1/chat/completions"
+              value: "http://model-service.{{ .Values.namespace }}.svc.cluster.local/v1/chat/completions"
             - name: API_KEY
               valueFrom:
                 secretKeyRef:

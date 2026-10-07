@@ -12,6 +12,8 @@ spec:
     helm:
       valueFiles:
         - values-production.yaml
+        # The state of the current release. Later files win.
+        - values-production-canary.yaml
   destination:
     server: https://kubernetes.default.svc
     namespace: production
