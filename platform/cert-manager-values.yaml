@@ -25,10 +25,10 @@ cainjector:
   resources:
     requests:
       cpu: 25m
-      memory: 64Mi
+      memory: 128Mi
     limits:
-      cpu: 100m
-      memory: 192Mi
+      cpu: 200m
+      memory: 512Mi
 
 # A post install check job. Argo CD retries on its own, so it adds nothing.
 startupapicheck:
