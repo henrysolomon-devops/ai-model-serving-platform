@@ -28,6 +28,8 @@ spec:
         # a node port. 8003 is inside the range k3s is configured for, and it
         # is the port the security group opens.
         type: NodePort
+        # Any node can answer, not only the one running the proxy.
+        externalTrafficPolicy: Cluster
         patch:
           type: StrategicMerge
           value:

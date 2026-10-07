@@ -66,7 +66,7 @@ jobs:
     if: needs.check-infra.outputs.up == 'true'
     runs-on: ubuntu-latest
     environment: staging
-    timeout-minutes: 45
+    timeout-minutes: 60
     env:
       SG: ${{ needs.check-infra.outputs.sg }}
       TAG: ${{ needs.check-infra.outputs.tag }}
@@ -78,17 +78,20 @@ jobs:
           role-to-assume: ${{ env.ROLE_ARN }}
           aws-region: us-east-1
 
-      - name: Let this runner reach the k3s API and the staging ports
+      - name: Let this runner reach the k3s API, the chat UI and the gateway
         id: access
         run: |
           cidr="$(curl -s ifconfig.me)/32"
           echo "cidr=$cidr" >> "$GITHUB_OUTPUT"
-          for port in 6443 8001 8011; do
+          for port in 6443 8001 8003; do
             aws ec2 authorize-security-group-ingress \
               --group-id "$SG" --protocol tcp --port "$port" --cidr "$cidr"
           done
 
-      # Argo CD polls Git every few minutes, so wait for the new tag to land.
+      # Argo CD polls Git every few minutes, so wait for the new tag to land
+      # and for its pod to come up. Rollout status would give up too early:
+      # KServe's Deployment has a 10 minute deadline and a cold start can
+      # take longer.
       - name: Wait for Argo CD to roll out the tag
         id: rollout
         env:
@@ -96,16 +99,20 @@ jobs:
         run: |
           mkdir -p ~/.kube
           echo "$KUBECONFIG_B64" | base64 -d > ~/.kube/config
-          deadline=$((SECONDS + 1500))
-          until [ "$(kubectl get deployment model-service -n staging \
-              -o jsonpath='{.spec.template.spec.containers[0].image}' | sed 's/.*://')" = "$TAG" ]; do
+          # One line per model pod: its image and whether it is ready.
+          pods() {
+            kubectl get pods -n staging -l serving.kserve.io/inferenceservice=model-service \
+              -o jsonpath='{range .items[*]}{.spec.containers[0].image}{" "}{.status.containerStatuses[0].ready}{"\n"}{end}'
+          }
+          deadline=$((SECONDS + 2400))
+          # Exactly one pod, on the new tag and ready, so the old one is gone.
+          until [ "$(pods | sed 's/.*://')" = "$TAG true" ]; do
             if [ "$SECONDS" -ge "$deadline" ]; then
-              echo "::error::Staging never picked up ${TAG:0:7}."
+              echo "::error::Staging never got a ready model pod on ${TAG:0:7}."
               exit 1
             fi
             sleep 20
           done
-          kubectl rollout status deployment/model-service -n staging --timeout=20m
           kubectl rollout status deployment/chat-ui -n staging --timeout=5m
           ip=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}' \
             | sed -E 's|https://([^:]+):.*|\1|')
@@ -128,7 +135,7 @@ jobs:
         env:
           CIDR: ${{ steps.access.outputs.cidr }}
         run: |
-          for port in 6443 8001 8011; do
+          for port in 6443 8001 8003; do
             aws ec2 revoke-security-group-ingress \
               --group-id "$SG" --protocol tcp --port "$port" --cidr "$CIDR" || true
           done
