@@ -19,6 +19,9 @@ log() {
   printf '[entrypoint %s] %s\n' "$(date -u +%H:%M:%S)" "$*"
 }
 
+# An empty key would start vLLM with no authentication at all.
+: "${API_KEY:?API_KEY must be set and not empty}"
+
 START=$SECONDS
 log "Starting up. Model: ${MODEL_ID}, weights bucket: ${WEIGHTS_BUCKET}"
 
@@ -31,7 +34,13 @@ MARKER="${MODEL_DIR}/.complete"
 if [ ! -f "${MARKER}" ]; then
   log "Weights are not on local disk, checking the S3 cache..."
   step=$SECONDS
-  aws s3 sync "${S3_PREFIX}" "${MODEL_DIR}" --only-show-errors || true
+  # The marker is copied on its own, and only if the sync finished, so a
+  # sync that dies halfway can never leave a marker without the weights.
+  if aws s3 sync "${S3_PREFIX}" "${MODEL_DIR}" --exclude ".complete" --only-show-errors; then
+    aws s3 cp "${S3_PREFIX}.complete" "${MARKER}" --only-show-errors 2> /dev/null || true
+  else
+    log "The S3 sync did not finish, so the cache is not used."
+  fi
   log "S3 cache check finished in $((SECONDS - step))s."
 fi
 

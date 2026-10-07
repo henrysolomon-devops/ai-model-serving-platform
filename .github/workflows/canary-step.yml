@@ -206,13 +206,24 @@ jobs:
     needs: [plan, approve]
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       statuses: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      # If the release was aborted while the approval was waiting, the
+      # canary is off by now and an approval must not be recorded.
       - name: Record the approval on the image's commit
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.plan.outputs.tag }}
         run: |
+          if ! bash scripts/canary-state.sh running "$TAG"; then
+            echo "::warning::The canary is no longer running ${TAG:0:7}, so the approval was not recorded."
+            exit 0
+          fi
           gh api "repos/$GITHUB_REPOSITORY/statuses/$TAG" \
             -f state=success \
             -f context="canary-weight-${WEIGHT}" \
@@ -243,6 +254,11 @@ jobs:
       # it within a few minutes, so this is quick but not instant. If this
       # run was the one that started the canary, switch it off completely
       # so it does not hold a GPU for nothing.
+      # A run that was cancelled halfway may have left its own pull request
+      # open with auto-merge on. Close it so it can not merge later.
+      - name: Close pull requests left open by this release
+        run: bash scripts/canary-state.sh close-open
+
       - name: Send all traffic back to the stable model
         run: |
           if [ "$WAKE" = "true" ]; then

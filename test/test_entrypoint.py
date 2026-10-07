@@ -16,16 +16,32 @@ SCRIPT = Path(__file__).resolve().parent.parent / "model-service" / "entrypoint.
 FAKE_AWS = """#!/usr/bin/env bash
 set -eu
 echo "aws $*" >> "$FAKE_DIR/calls.log"
-[ "$1 $2" = "s3 sync" ] || [ "$1 $2" = "s3 cp" ] || exit 1
-src="$3"; dst="$4"
-if [ "$2" = "cp" ]; then
+[ "$1" = "s3" ] || exit 1
+mode="$2"; src="$3"; dst="$4"
+exclude=0
+case "$*" in *'--exclude .complete'*) exclude=1 ;; esac
+if [ "$mode" = "cp" ]; then
   case "$dst" in
     s3://*) mkdir -p "$FAKE_S3"; cp "$src" "$FAKE_S3/$(basename "$dst")" ;;
+    *) [ -f "$FAKE_S3/$(basename "$src")" ] || exit 1; cp "$FAKE_S3/$(basename "$src")" "$dst" ;;
   esac
   exit 0
 fi
 case "$src" in
-  s3://*) [ -d "$FAKE_S3" ] && cp -r "$FAKE_S3/." "$dst/" || true ;;
+  s3://*)
+    [ -d "$FAKE_S3" ] || exit 0
+    if [ -n "${FAKE_SYNC_FAIL:-}" ]; then
+      # Copies the marker first like a real sync would (dot files sort first), then dies.
+      [ "$exclude" = 1 ] || cp "$FAKE_S3/.complete" "$dst/.complete" 2> /dev/null || true
+      cp "$FAKE_S3/config.json" "$dst/config.json"
+      exit 1
+    fi
+    for f in "$FAKE_S3"/* "$FAKE_S3"/.[!.]*; do
+      [ -e "$f" ] || continue
+      [ "$exclude" = 1 ] && [ "$(basename "$f")" = ".complete" ] && continue
+      cp -r "$f" "$dst/"
+    done
+    ;;
   *) mkdir -p "$FAKE_S3"; cp -r "$src/." "$FAKE_S3/" ;;
 esac
 """
@@ -129,3 +145,25 @@ def test_a_failed_download_stops_before_vllm(box):
     assert result.returncode != 0
     assert not any(c.startswith("vllm") for c in calls)
     assert not (tmp / "s3" / ".complete").exists()
+
+
+def test_sync_that_dies_halfway_leaves_no_marker(box):
+    env, tmp = box
+    s3 = tmp / "s3"
+    s3.mkdir()
+    for name in ("config.json", "model.safetensors", ".complete"):
+        (s3 / name).write_text("x")
+    env["FAKE_SYNC_FAIL"] = "1"
+    result, calls = start(env)
+    assert result.returncode == 0, result.stderr
+    assert "did not finish" in result.stdout
+    assert any(c.startswith("hf download") for c in calls)
+
+
+def test_empty_api_key_stops_everything(box):
+    env, _ = box
+    env["API_KEY"] = ""
+    result = subprocess.run(["bash", str(SCRIPT)], env=env, text=True, capture_output=True)
+    assert result.returncode != 0
+    assert "API_KEY" in result.stderr
+    assert not Path(env["FAKE_DIR"], "calls.log").exists()
