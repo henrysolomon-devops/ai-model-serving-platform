@@ -1,0 +1,48 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kserve
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/henrysolomon-devops/ai-model-serving-platform.git
+    targetRevision: main
+    # A kustomization that pulls the pinned KServe release and patches it.
+    path: platform/kserve
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kserve
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      # The InferenceService CRD is too big for a normal client-side apply.
+      - ServerSideApply=true
+      # The certificate and issuer need cert-manager, which may not be ready
+      # yet on a fresh cluster. Retry until it is.
+      - SkipDryRunOnMissingResource=true
+      - RespectIgnoreDifferences=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 10m
+  # cert-manager fills in the CA bundle after the objects are created. Without
+  # this, Argo CD sees the difference and keeps trying to wipe it.
+  ignoreDifferences:
+    - group: admissionregistration.k8s.io
+      kind: MutatingWebhookConfiguration
+      jqPathExpressions:
+        - .webhooks[]?.clientConfig.caBundle
+    - group: admissionregistration.k8s.io
+      kind: ValidatingWebhookConfiguration
+      jqPathExpressions:
+        - .webhooks[]?.clientConfig.caBundle
+    - group: apiextensions.k8s.io
+      kind: CustomResourceDefinition
+      jqPathExpressions:
+        - .spec.conversion.webhook.clientConfig.caBundle
