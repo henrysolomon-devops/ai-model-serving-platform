@@ -1,0 +1,252 @@
+name: Canary step
+
+# Moves a share of production traffic to the new image, checks the canary
+# against the stable model, then waits for a person to approve. Run it with
+# 10, then 50, then 100. A failed check or a rejected approval rolls the
+# traffic back to the stable model.
+on:
+  workflow_dispatch:
+    inputs:
+      weight:
+        description: Percent of traffic for the canary
+        type: choice
+        options: ["10", "50", "100"]
+        required: true
+
+permissions:
+  contents: read
+
+# One release at a time, and a waiting approval keeps the next run in line.
+concurrency:
+  group: canary
+  cancel-in-progress: false
+
+env:
+  ROLE_ARN: arn:aws:iam::578254188866:role/github-actions-ai-model-serving-role
+  WEIGHT: ${{ inputs.weight }}
+
+jobs:
+  plan:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: read
+    outputs:
+      tag: ${{ steps.plan.outputs.tag }}
+      wake: ${{ steps.plan.outputs.wake }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check that this step may run
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/canary-plan.sh "$WEIGHT" | tee -a "$GITHUB_OUTPUT"
+
+  shift:
+    needs: plan
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 120
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      TAG: ${{ needs.plan.outputs.tag }}
+      WAKE: ${{ needs.plan.outputs.wake }}
+      GH_TOKEN: ${{ secrets.ADMIN_PAT }}
+    outputs:
+      check: ${{ steps.check.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.ADMIN_PAT }}
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Find the security group
+        id: infra
+        run: |
+          sg=$(aws ec2 describe-security-groups \
+            --filters Name=group-name,Values=ai-model-serving-sg \
+            --query 'SecurityGroups[0].GroupId' --output text)
+          if [ "$sg" = "None" ]; then
+            echo "::error::Infrastructure is down. Run the Infrastructure workflow with apply first."
+            exit 1
+          fi
+          echo "sg=$sg" >> "$GITHUB_OUTPUT"
+
+      - name: Let this runner reach the k3s API and the gateway
+        id: access
+        env:
+          SG: ${{ steps.infra.outputs.sg }}
+        run: |
+          cidr="$(curl -s ifconfig.me)/32"
+          echo "cidr=$cidr" >> "$GITHUB_OUTPUT"
+          for port in 6443 8003; do
+            aws ec2 authorize-security-group-ingress \
+              --group-id "$SG" --protocol tcp --port "$port" --cidr "$cidr"
+          done
+
+      - name: Load the kubeconfig
+        id: cluster
+        env:
+          KUBECONFIG_B64: ${{ secrets.KUBECONFIG_B64 }}
+        run: |
+          mkdir -p ~/.kube
+          echo "$KUBECONFIG_B64" | base64 -d > ~/.kube/config
+          ip=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}' \
+            | sed -E 's|https://([^:]+):.*|\1|')
+          echo "ip=$ip" >> "$GITHUB_OUTPUT"
+
+      # The canary starts at weight 0, so its pod can warm up without
+      # taking any traffic.
+      - name: Start the canary
+        if: env.WAKE == 'true'
+        run: |
+          bash scripts/canary-state.sh write on 0 "$TAG"
+          bash scripts/canary-state.sh pr "bot/canary-start-${TAG:0:7}-$GITHUB_RUN_ID" \
+            "Start the canary for ${TAG:0:7}"
+          kubectl -n argocd annotate application model-production \
+            argocd.argoproj.io/refresh=hard --overwrite
+          # One line per canary pod: its image and whether it is ready.
+          pods() {
+            kubectl get pods -n production -l serving.kserve.io/inferenceservice=model-service-canary \
+              -o jsonpath='{range .items[*]}{.spec.containers[0].image}{" "}{.status.containerStatuses[0].ready}{"\n"}{end}'
+          }
+          deadline=$((SECONDS + 2400))
+          until [ "$(pods | sed 's/.*://')" = "$TAG true" ]; do
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::The canary never got a ready pod on ${TAG:0:7}."
+              exit 1
+            fi
+            sleep 20
+          done
+
+      - name: Set the traffic weight
+        id: weight
+        run: |
+          bash scripts/canary-state.sh write on "$WEIGHT" "$TAG"
+          bash scripts/canary-state.sh pr "bot/canary-${WEIGHT}-${TAG:0:7}-$GITHUB_RUN_ID" \
+            "Send ${WEIGHT} percent of production traffic to the canary"
+          kubectl -n argocd annotate application model-production \
+            argocd.argoproj.io/refresh=hard --overwrite
+          route() {
+            kubectl get httproute model-service -n production \
+              -o jsonpath='{.spec.rules[0].backendRefs[?(@.name=="model-service-canary-predictor")].weight}'
+          }
+          deadline=$((SECONDS + 600))
+          until [ "$(route)" = "$WEIGHT" ]; do
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::The route never reached weight ${WEIGHT}."
+              exit 1
+            fi
+            sleep 10
+          done
+          # Give the gateway a moment to pick up the new route.
+          sleep 15
+
+      # The check can fail without stopping this job, so the report is
+      # always written before the job ends.
+      - name: Compare the canary with the stable model
+        id: check
+        env:
+          API_KEY: ${{ secrets.API_KEY }}
+          SERVER_IP: ${{ steps.cluster.outputs.ip }}
+          CANARY_REPORT: ${{ runner.temp }}/canary-report.md
+        run: |
+          code=0
+          bash test/canary-check.sh "$WEIGHT" "$SERVER_IP" "$API_KEY" || code=$?
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
+      - name: Publish the report
+        if: always() && steps.check.outcome != 'skipped'
+        env:
+          PR: ${{ steps.weight.outputs.pr }}
+          REPORT: ${{ runner.temp }}/canary-report.md
+        run: |
+          [ -f "$REPORT" ] || exit 0
+          cat "$REPORT" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$PR" ]; then
+            gh pr comment "$PR" --body-file "$REPORT"
+          fi
+
+      - name: Close the temporary access
+        if: always() && steps.access.outcome == 'success'
+        env:
+          SG: ${{ steps.infra.outputs.sg }}
+          CIDR: ${{ steps.access.outputs.cidr }}
+        run: |
+          for port in 6443 8003; do
+            aws ec2 revoke-security-group-ingress \
+              --group-id "$SG" --protocol tcp --port "$port" --cidr "$CIDR" || true
+          done
+
+      - name: Fail the job if the check failed
+        if: steps.check.outputs.code != '0'
+        run: |
+          echo "::error::The canary check failed at ${WEIGHT} percent. Rolling back."
+          exit 1
+
+  approve:
+    needs: shift
+    runs-on: ubuntu-latest
+    environment: canary-approval
+    steps:
+      - name: Approved
+        run: echo "A reviewer approved ${WEIGHT} percent."
+
+  record:
+    needs: [plan, approve]
+    runs-on: ubuntu-latest
+    permissions:
+      statuses: write
+    steps:
+      - name: Record the approval on the image's commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.plan.outputs.tag }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$TAG" \
+            -f state=success \
+            -f context="canary-weight-${WEIGHT}" \
+            -f description="Canary at ${WEIGHT} percent was checked and approved" \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+  rollback:
+    needs: [plan, shift, approve]
+    if: >-
+      always() && needs.plan.result == 'success' &&
+      (needs.shift.result == 'failure' || needs.approve.result == 'failure')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: write
+    env:
+      TAG: ${{ needs.plan.outputs.tag }}
+      GH_TOKEN: ${{ secrets.ADMIN_PAT }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.ADMIN_PAT }}
+
+      # Weight 0 sends everything back to the stable model. Argo CD syncs
+      # it within a few minutes, so this is quick but not instant.
+      - name: Send all traffic back to the stable model
+        run: |
+          bash scripts/canary-state.sh write on 0 "$TAG"
+          bash scripts/canary-state.sh pr "bot/canary-rollback-${TAG:0:7}-$GITHUB_RUN_ID" \
+            "Roll back the canary for ${TAG:0:7}"
+
+      - name: Record the failure on the image's commit
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$TAG" \
+            -f state=failure \
+            -f context="canary-weight-${WEIGHT}" \
+            -f description="Canary at ${WEIGHT} percent failed or was rejected" \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
