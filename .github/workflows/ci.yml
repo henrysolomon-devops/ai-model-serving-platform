@@ -50,6 +50,26 @@ jobs:
       - name: Rendering without an environment file must fail
         run: "! helm template t helm/ai-model-serving"
 
+      - name: Render production with the canary off and on
+        run: |
+          chart=helm/ai-model-serving
+          files=(-f "$chart/values-production.yaml" -f "$chart/values-production-canary.yaml")
+          helm lint "$chart" "${files[@]}"
+          helm template t "$chart" "${files[@]}" > /dev/null
+          helm template t "$chart" "${files[@]}" \
+            --set canary.enabled=true --set canary.image.tag=abc --set canary.weight=20 > /dev/null
+
+      - name: A canary without an image tag must fail
+        run: |
+          chart=helm/ai-model-serving
+          ! helm template t "$chart" -f "$chart/values-production.yaml" --set canary.enabled=true
+
+      - name: A canary weight above 100 must fail
+        run: |
+          chart=helm/ai-model-serving
+          ! helm template t "$chart" -f "$chart/values-production.yaml" \
+            --set canary.enabled=true --set canary.image.tag=abc --set canary.weight=150
+
   platform:
     runs-on: ubuntu-latest
     steps:

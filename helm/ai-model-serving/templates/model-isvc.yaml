@@ -1,0 +1,9 @@
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: model-service
+  namespace: {{ required "namespace must be set" .Values.namespace }}
+  annotations:
+    serving.kserve.io/deploymentMode: Standard
+spec:
+{{- template "model.predictor" (dict "root" . "tag" (required "model.image.tag must be set" .Values.model.image.tag) "nodeEnvironment" .Values.namespace) }}

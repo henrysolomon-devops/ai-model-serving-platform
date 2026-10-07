@@ -1,7 +1,7 @@
 # The one entry point for model traffic. KServe attaches its routes to this
 # Gateway, and so does the weighted route that splits canary traffic.
 
-# Settings for the Envoy proxy that Envoy Gateway starts.
+# Settings for the Envoy proxy that Envoy Gateway starts for us.
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: EnvoyProxy
 metadata:
@@ -22,6 +22,8 @@ spec:
               cpu: 500m
               memory: 384Mi
       envoyService:
+        # A fixed name, so the model Services can point at the gateway.
+        name: model-gateway
         # There is no cloud load balancer on k3s, so the proxy is reached on
         # a node port. 8003 is inside the range k3s is configured for, and it
         # is the port the security group opens.
