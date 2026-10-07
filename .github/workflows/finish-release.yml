@@ -40,7 +40,9 @@ jobs:
 
       - name: Check that a release is waiting to finish
         id: plan
-        run: bash scripts/finish-plan.sh | tee -a "$GITHUB_OUTPUT"
+        run: |
+          bash scripts/finish-plan.sh > "$RUNNER_TEMP/plan.out"
+          tee -a "$GITHUB_OUTPUT" < "$RUNNER_TEMP/plan.out"
 
       - uses: aws-actions/configure-aws-credentials@v4
         if: steps.plan.outputs.act == 'true'

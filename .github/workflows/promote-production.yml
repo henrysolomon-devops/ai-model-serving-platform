@@ -30,7 +30,9 @@ jobs:
         id: plan
         env:
           GH_TOKEN: ${{ github.token }}
-        run: bash scripts/promote-plan.sh | tee -a "$GITHUB_OUTPUT"
+        run: |
+          bash scripts/promote-plan.sh > "$RUNNER_TEMP/plan.out"
+          tee -a "$GITHUB_OUTPUT" < "$RUNNER_TEMP/plan.out"
 
       - name: Close older promote PRs that are still open
         run: |

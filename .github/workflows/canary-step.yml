@@ -42,7 +42,9 @@ jobs:
         id: plan
         env:
           GH_TOKEN: ${{ github.token }}
-        run: bash scripts/canary-plan.sh "$WEIGHT" | tee -a "$GITHUB_OUTPUT"
+        run: |
+          bash scripts/canary-plan.sh "$WEIGHT" > "$RUNNER_TEMP/plan.out"
+          tee -a "$GITHUB_OUTPUT" < "$RUNNER_TEMP/plan.out"
 
   shift:
     needs: plan
