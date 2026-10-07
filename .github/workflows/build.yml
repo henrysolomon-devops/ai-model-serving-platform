@@ -26,7 +26,7 @@ jobs:
 
   build:
     needs: test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       packages: write
@@ -57,7 +57,7 @@ jobs:
   # Opens a PR that moves staging to the new image, with auto-merge on.
   bump-staging:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     concurrency:
       group: bump-staging
       cancel-in-progress: false
