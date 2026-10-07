@@ -23,10 +23,10 @@ data "aws_ami" "deep_learning" {
   }
 }
 
-# Two nodes with one T4 each: the control plane hosts staging and the
-# worker hosts production, so each environment gets its own GPU.
-# g4dn.xlarge because the account's GPU vCPU quota is 8, which fits
-# exactly two of them. On-demand, so a node never disappears mid-test.
+# Three nodes with one T4 each: the control plane hosts staging, the
+# worker hosts production, and the canary node hosts the canary during
+# a release. g4dn.xlarge keeps it at 12 vCPUs, well inside the GPU quota
+# of 24. On-demand, so a node never disappears mid-test.
 resource "aws_instance" "control_plane" {
   ami                    = data.aws_ami.deep_learning.id
   instance_type          = "g4dn.xlarge"
@@ -78,6 +78,28 @@ resource "aws_instance" "worker" {
   }
 }
 
+resource "aws_instance" "canary" {
+  ami                    = data.aws_ami.deep_learning.id
+  instance_type          = "g4dn.xlarge"
+  subnet_id              = aws_subnet.public.id
+  vpc_security_group_ids = [aws_security_group.server.id]
+  key_name               = aws_key_pair.ai_model_serving.key_name
+  iam_instance_profile   = "ai-model-serving-ec2-weights-access"
+
+  metadata_options {
+    http_put_response_hop_limit = 2
+  }
+
+  root_block_device {
+    volume_size = 100
+    volume_type = "gp3"
+  }
+
+  tags = {
+    Name = "ai-model-serving-canary"
+  }
+}
+
 # Static IPs that stay locked to each instance across every
 # apply/destroy cycle, so they don't need chasing down again each time.
 resource "aws_eip" "control_plane" {
@@ -95,5 +117,14 @@ resource "aws_eip" "worker" {
 
   tags = {
     Name = "ai-model-serving-worker-eip"
+  }
+}
+
+resource "aws_eip" "canary" {
+  instance = aws_instance.canary.id
+  domain   = "vpc"
+
+  tags = {
+    Name = "ai-model-serving-canary-eip"
   }
 }

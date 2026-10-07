@@ -1,8 +1,8 @@
 name: Infrastructure (Terraform + Ansible)
 
 # Manual on purpose, this touches real GPU-instance money. Pick apply
-# to bring the cluster up (Terraform, then k3s and the NVIDIA device
-# plugin via Ansible), or destroy to tear everything down again.
+# to bring the three-node cluster up (Terraform, then k3s and the NVIDIA
+# device plugin via Ansible), or destroy to tear everything down again.
 on:
   workflow_dispatch:
     inputs:
@@ -92,6 +92,7 @@ jobs:
         run: |
           echo "control_plane=$(terraform output -raw control_plane_public_ip)" >> "$GITHUB_OUTPUT"
           echo "worker=$(terraform output -raw worker_public_ip)" >> "$GITHUB_OUTPUT"
+          echo "canary=$(terraform output -raw canary_public_ip)" >> "$GITHUB_OUTPUT"
           echo "control_plane_private=$(terraform output -raw control_plane_private_ip)" >> "$GITHUB_OUTPUT"
 
       - name: Look up the security group this run needs to touch
@@ -134,6 +135,7 @@ jobs:
           ./deploy-k3s.sh \
             "${{ steps.ips.outputs.control_plane }}" \
             "${{ steps.ips.outputs.worker }}" \
+            "${{ steps.ips.outputs.canary }}" \
             "${{ steps.ips.outputs.control_plane_private }}"
 
       - name: Create the staging and production namespaces

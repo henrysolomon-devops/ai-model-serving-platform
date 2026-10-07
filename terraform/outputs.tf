@@ -9,8 +9,13 @@ output "worker_public_ip" {
   value       = aws_eip.worker.public_ip
 }
 
-# The worker joins the cluster over the VPC's private network.
+output "canary_public_ip" {
+  description = "Public IP of the canary node (hosts the canary during a release)"
+  value       = aws_eip.canary.public_ip
+}
+
+# The worker and the canary node join the cluster over the VPC's private network.
 output "control_plane_private_ip" {
-  description = "Private IP of the control plane, used by the worker to join"
+  description = "Private IP of the control plane, used by the other nodes to join"
   value       = aws_instance.control_plane.private_ip
 }

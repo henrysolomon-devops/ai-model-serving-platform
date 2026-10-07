@@ -1,21 +1,23 @@
 #!/usr/bin/env bash
-# Takes the control plane's public IP, the worker's public IP, and the
-# control plane's private IP (all from `terraform output`, passed in by
-# infra.yml). Runs the Ansible playbook against both nodes to build the
-# k3s cluster, then fetches the kubeconfig so kubectl/helm can be used
-# against it from outside.
+# Takes the public IPs of the control plane, the worker and the canary
+# node, plus the control plane's private IP (all from `terraform output`,
+# passed in by infra.yml). Runs the Ansible playbook against the three
+# nodes to build the k3s cluster, then fetches the kubeconfig so
+# kubectl/helm can be used against it from outside.
 set -euo pipefail
 
-if [ $# -lt 3 ]; then
-  echo "Usage: $0 <control-plane-public-ip> <worker-public-ip> <control-plane-private-ip>"
+if [ $# -lt 4 ]; then
+  echo "Usage: $0 <control-plane-public-ip> <worker-public-ip> <canary-public-ip> <control-plane-private-ip>"
   exit 1
 fi
 
 CONTROL_PLANE_IP="$1"
 WORKER_IP="$2"
-CONTROL_PLANE_PRIVATE_IP="$3"
+CANARY_IP="$3"
+CONTROL_PLANE_PRIVATE_IP="$4"
 echo "Control plane: $CONTROL_PLANE_IP (private: $CONTROL_PLANE_PRIVATE_IP)"
 echo "Worker: $WORKER_IP"
+echo "Canary: $CANARY_IP"
 
 INVENTORY=$(mktemp)
 trap 'rm -f "$INVENTORY"' EXIT
@@ -24,7 +26,10 @@ cat > "$INVENTORY" <<EOF
 ${CONTROL_PLANE_IP}
 
 [worker]
-${WORKER_IP}
+${WORKER_IP} node_environment=production
+
+[canary]
+${CANARY_IP} node_environment=canary
 EOF
 
 ansible-playbook -i "$INVENTORY" install-k3s.yml \
@@ -42,3 +47,4 @@ echo ""
 echo "Once the model service is deployed (later steps), it will be reachable at:"
 echo "  Staging:    http://${CONTROL_PLANE_IP}:8001  (chat UI)   http://${CONTROL_PLANE_IP}:8011  (model API)"
 echo "  Production: http://${WORKER_IP}:8002  (chat UI)   http://${WORKER_IP}:8012  (model API)"
+echo "  Gateway:    port 8003 on any node (splits traffic between production and the canary)"
