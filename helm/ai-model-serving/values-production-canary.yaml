@@ -1,6 +1,6 @@
 # The state of the current release. Only the canary workflows edit this file.
 canary:
-  enabled: false
+  enabled: true
   weight: 0
   image:
-    tag: ""
+    tag: "b28a3f7859456e05808cbefde078ee6d4fde87b9"
