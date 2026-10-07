@@ -125,9 +125,11 @@ jobs:
 
       - name: Write out the SSH private key so Ansible can use it
         if: inputs.action == 'apply'
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/ai-model-serving-key
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/ai-model-serving-key
           chmod 600 ~/.ssh/ai-model-serving-key
 
       - name: Run the Ansible playbook to build the cluster and expose the GPUs

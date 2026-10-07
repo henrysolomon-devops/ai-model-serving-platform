@@ -1,0 +1,30 @@
+name: Abort release
+
+# The way out of a release that should not go on: the canary was started
+# for an image that is no longer the one on staging, or the checks keep
+# failing and nobody wants to continue. It sends all traffic back to the
+# stable model and switches the canary off. It does not wait in line behind
+# a canary run that is waiting for approval, since that is when it is needed.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  abort:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.ADMIN_PAT }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.ADMIN_PAT }}
+
+      - name: Switch the canary off
+        run: |
+          bash scripts/canary-state.sh write off 0 ""
+          bash scripts/canary-state.sh pr "bot/canary-abort-$GITHUB_RUN_ID" \
+            "Abort the release and switch the canary off"

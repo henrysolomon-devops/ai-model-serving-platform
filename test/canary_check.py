@@ -111,7 +111,7 @@ class Cluster:
     def route_weights(self):
         """The backend weights of the production route, by Service name."""
         result = subprocess.run(
-            ["kubectl", "get", "httproute", "model-service", "-n", NAMESPACE, "-o", "json"],
+            ["kubectl", "get", "httproute", "model-traffic", "-n", NAMESPACE, "-o", "json"],
             capture_output=True, text=True, check=True,
         )
         refs = json.loads(result.stdout)["spec"]["rules"][0]["backendRefs"]

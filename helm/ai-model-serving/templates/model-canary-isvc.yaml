@@ -1,3 +1,6 @@
+{{- if and .Values.canary.enabled (ne .Values.namespace "production") }}
+{{- fail "The canary only runs in production." }}
+{{- end }}
 {{- if .Values.canary.enabled }}
 apiVersion: serving.kserve.io/v1beta1
 kind: InferenceService
