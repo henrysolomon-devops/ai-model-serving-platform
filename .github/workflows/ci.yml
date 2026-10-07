@@ -1,7 +1,8 @@
 name: CI
 
 # Runners have no GPU, so this only checks contracts: the chat proxy against
-# a fake model backend, the Helm chart, the alert rules and the scripts.
+# a fake model backend, the Helm chart, the platform manifests, the alert
+# rules and the scripts.
 on:
   pull_request:
     branches: [main]
@@ -48,6 +49,30 @@ jobs:
 
       - name: Rendering without an environment file must fail
         run: "! helm template t helm/ai-model-serving"
+
+  platform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check that the manifests parse
+        run: |
+          for f in argocd/*.yaml platform/*.yaml platform/gateway/*.yaml; do
+            yq '.' "$f" > /dev/null
+          done
+
+      - name: Build the KServe kustomization and check the patches
+        run: |
+          kubectl kustomize platform/kserve > "$RUNNER_TEMP/kserve.yaml"
+          grep -q '"defaultDeploymentMode": "Standard"' "$RUNNER_TEMP/kserve.yaml"
+          grep -q '"enableGatewayApi": true' "$RUNNER_TEMP/kserve.yaml"
+          ! yq 'select(.kind == "DaemonSet") | .metadata.name' "$RUNNER_TEMP/kserve.yaml" \
+            | grep -q kernelcachenode
+
+      - name: The gateway name must match what KServe is told to use
+        run: |
+          grep -q 'name: kserve-ingress-gateway' platform/gateway/gateway.yaml
+          grep -q '"kserveIngressGateway": "kserve/kserve-ingress-gateway"' platform/kserve/inferenceservice-config.yaml
 
   scripts:
     runs-on: ubuntu-latest

@@ -213,6 +213,18 @@ jobs:
           KUBECONFIG_B64=$(base64 -w 0 ~/.kube/ai-model-serving-config)
           gh secret set KUBECONFIG_B64 --body "$KUBECONFIG_B64"
 
+      # Fail here, not later, if the platform apps cannot come up.
+      - name: Wait for the platform apps
+        if: inputs.action == 'apply'
+        run: |
+          export KUBECONFIG=~/.kube/ai-model-serving-config
+          for app in cert-manager envoy-gateway gateway-config kserve; do
+            kubectl wait "application/$app" -n argocd \
+              --for=jsonpath='{.status.sync.status}'=Synced --timeout=10m
+            kubectl wait "application/$app" -n argocd \
+              --for=jsonpath='{.status.health.status}'=Healthy --timeout=10m
+          done
+
       - name: Take the temporary SSH and API access back out
         if: always() && inputs.action == 'apply'
         run: |
