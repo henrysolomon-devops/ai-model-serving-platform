@@ -1,0 +1,78 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# The official KServe release, pinned. Argo CD fetches it when it renders.
+resources:
+  - https://github.com/kserve/kserve/releases/download/v0.21.0/kserve.yaml
+
+patches:
+  # The release defaults to Serverless mode, which needs Knative and Istio.
+  # Standard mode is plain Deployments and Services, and routes through the
+  # Gateway API instead.
+  - path: inferenceservice-config.yaml
+
+  # Only one pod per node is worth its memory here. This agent belongs to a
+  # caching feature we do not use, and it would run on every node.
+  - target:
+      kind: DaemonSet
+      name: kserve-kernelcachenode-agent
+    patch: |-
+      $patch: delete
+      apiVersion: apps/v1
+      kind: DaemonSet
+      metadata:
+        name: kserve-kernelcachenode-agent
+
+  # Smaller requests so the controllers fit next to the model pods. The
+  # limits from the release stay as they are.
+  - target:
+      kind: Deployment
+      name: kserve-controller-manager
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: kserve-controller-manager
+      spec:
+        template:
+          spec:
+            containers:
+              - name: manager
+                resources:
+                  requests:
+                    cpu: 50m
+                    memory: 128Mi
+  - target:
+      kind: Deployment
+      name: kserve-localmodel-controller-manager
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: kserve-localmodel-controller-manager
+      spec:
+        template:
+          spec:
+            containers:
+              - name: manager
+                resources:
+                  requests:
+                    cpu: 25m
+                    memory: 64Mi
+  - target:
+      kind: Deployment
+      name: llmisvc-controller-manager
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: llmisvc-controller-manager
+      spec:
+        template:
+          spec:
+            containers:
+              - name: manager
+                resources:
+                  requests:
+                    cpu: 25m
+                    memory: 64Mi

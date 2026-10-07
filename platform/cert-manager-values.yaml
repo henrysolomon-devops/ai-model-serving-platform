@@ -1,0 +1,35 @@
+# Everything not listed here stays at the chart's defaults.
+
+# The chart ships its CRDs but leaves them off unless asked.
+crds:
+  enabled: true
+
+resources:
+  requests:
+    cpu: 25m
+    memory: 64Mi
+  limits:
+    cpu: 100m
+    memory: 192Mi
+
+webhook:
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 96Mi
+
+cainjector:
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 192Mi
+
+# A post install check job. Argo CD retries on its own, so it adds nothing.
+startupapicheck:
+  enabled: false

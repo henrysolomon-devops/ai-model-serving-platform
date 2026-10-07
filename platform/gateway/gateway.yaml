@@ -1,0 +1,65 @@
+# The one entry point for model traffic. KServe attaches its routes to this
+# Gateway, and so does the weighted route that splits canary traffic.
+
+# Settings for the Envoy proxy that Envoy Gateway starts.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: model-gateway
+  namespace: kserve
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyDeployment:
+        replicas: 1
+        container:
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 384Mi
+      envoyService:
+        # There is no cloud load balancer on k3s, so the proxy is reached on
+        # a node port. 8003 is inside the range k3s is configured for, and it
+        # is the port the security group opens.
+        type: NodePort
+        patch:
+          type: StrategicMerge
+          value:
+            spec:
+              ports:
+                - port: 80
+                  nodePort: 8003
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: envoy
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
+  parametersRef:
+    group: gateway.envoyproxy.io
+    kind: EnvoyProxy
+    name: model-gateway
+    namespace: kserve
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  # KServe looks for this exact name and namespace, set in
+  # platform/kserve/inferenceservice-config.yaml.
+  name: kserve-ingress-gateway
+  namespace: kserve
+spec:
+  gatewayClassName: envoy
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        # Routes live in the staging and production namespaces, not here.
+        namespaces:
+          from: All

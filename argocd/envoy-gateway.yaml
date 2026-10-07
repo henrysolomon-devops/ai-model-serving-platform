@@ -1,0 +1,38 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: envoy-gateway
+  namespace: argocd
+spec:
+  project: default
+  sources:
+    # The chart is published as an OCI image. It also brings the Gateway API
+    # CRDs, so they are not installed separately.
+    - repoURL: docker.io/envoyproxy
+      chart: gateway-helm
+      targetRevision: v1.9.2
+      helm:
+        releaseName: envoy-gateway
+        valueFiles:
+          - $values/platform/envoy-gateway-values.yaml
+    # This repo, only used to read the values file above.
+    - repoURL: https://github.com/henrysolomon-devops/ai-model-serving-platform.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: envoy-gateway-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      # The CRDs are large, so a normal client-side apply can fail on them.
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 10m

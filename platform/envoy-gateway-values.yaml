@@ -1,0 +1,13 @@
+# Everything not listed here stays at the chart's defaults.
+
+deployment:
+  envoyGateway:
+    # The chart sets no CPU limit and a 1Gi memory limit. These are closer
+    # to what one small cluster needs.
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 300m
+        memory: 512Mi
