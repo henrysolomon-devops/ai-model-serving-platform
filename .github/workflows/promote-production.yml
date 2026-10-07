@@ -16,7 +16,7 @@ concurrency:
 jobs:
   promote:
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       GH_TOKEN: ${{ secrets.ADMIN_PAT }}
       PRODUCTION: helm/ai-model-serving/values-production.yaml

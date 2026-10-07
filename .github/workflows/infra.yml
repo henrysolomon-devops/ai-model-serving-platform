@@ -31,7 +31,7 @@ env:
 
 jobs:
   infra:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: aws-infra
     defaults:
       run:
