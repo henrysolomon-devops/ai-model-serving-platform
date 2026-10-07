@@ -8,9 +8,9 @@ tests:
   # A cold start may take a while. Only 25 minutes without a model is a problem.
   - interval: 1m
     input_series:
-      - series: 'kube_deployment_status_replicas_available{namespace="staging", deployment="model-service"}'
+      - series: 'kube_deployment_status_replicas_available{namespace="staging", deployment="model-service-predictor"}'
         values: '0x40'
-      - series: 'kube_deployment_status_replicas_available{namespace="production", deployment="model-service"}'
+      - series: 'kube_deployment_status_replicas_available{namespace="production", deployment="model-service-predictor"}'
         values: '0x15 1x25'
     alert_rule_test:
       - eval_time: 20m
@@ -21,21 +21,41 @@ tests:
         exp_alerts:
           - exp_labels:
               namespace: staging
-              deployment: model-service
+              deployment: model-service-predictor
               team: model
               severity: critical
             exp_annotations:
               summary: "Model is not available in staging"
-              description: "No model pod has been ready in staging for 25 minutes, longer than a cold start should take."
+              description: "No pod of model-service-predictor has been ready in staging for 25 minutes, longer than a cold start should take."
+
+  # A canary that never becomes ready alerts too, and the stable model does not.
+  - interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="production", deployment="model-service-predictor"}'
+        values: '1x40'
+      - series: 'kube_deployment_status_replicas_available{namespace="production", deployment="model-service-canary-predictor"}'
+        values: '0x40'
+    alert_rule_test:
+      - eval_time: 27m
+        alertname: ModelNotAvailable
+        exp_alerts:
+          - exp_labels:
+              namespace: production
+              deployment: model-service-canary-predictor
+              team: model
+              severity: critical
+            exp_annotations:
+              summary: "Model is not available in production"
+              description: "No pod of model-service-canary-predictor has been ready in production for 25 minutes, longer than a cold start should take."
 
   # Staging is ready but has no scrape target, production is healthy.
   - interval: 1m
     input_series:
-      - series: 'kube_deployment_status_replicas_available{namespace="staging", deployment="model-service"}'
+      - series: 'kube_deployment_status_replicas_available{namespace="staging", deployment="model-service-predictor"}'
         values: '1x40'
-      - series: 'kube_deployment_status_replicas_available{namespace="production", deployment="model-service"}'
+      - series: 'kube_deployment_status_replicas_available{namespace="production", deployment="model-service-predictor"}'
         values: '1x40'
-      - series: 'up{job="model-service", namespace="production"}'
+      - series: 'up{job="model-service", namespace="production", deployment="model-service-predictor"}'
         values: '1x40'
     alert_rule_test:
       - eval_time: 8m
@@ -46,19 +66,19 @@ tests:
         exp_alerts:
           - exp_labels:
               namespace: staging
-              deployment: model-service
+              deployment: model-service-predictor
               team: model
               severity: warning
             exp_annotations:
               summary: "No model metrics from staging"
-              description: "The model pod in staging is ready, but Prometheus has had no metrics from it for 10 minutes."
+              description: "model-service-predictor in staging is ready, but Prometheus has had no metrics from it for 10 minutes."
 
   # The target exists but every scrape fails.
   - interval: 1m
     input_series:
-      - series: 'kube_deployment_status_replicas_available{namespace="production", deployment="model-service"}'
+      - series: 'kube_deployment_status_replicas_available{namespace="production", deployment="model-service-predictor"}'
         values: '1x40'
-      - series: 'up{job="model-service", namespace="production"}'
+      - series: 'up{job="model-service", namespace="production", deployment="model-service-predictor"}'
         values: '0x40'
     alert_rule_test:
       - eval_time: 12m
@@ -66,17 +86,40 @@ tests:
         exp_alerts:
           - exp_labels:
               namespace: production
-              deployment: model-service
+              deployment: model-service-predictor
               team: model
               severity: warning
             exp_annotations:
               summary: "No model metrics from production"
-              description: "The model pod in production is ready, but Prometheus has had no metrics from it for 10 minutes."
+              description: "model-service-predictor in production is ready, but Prometheus has had no metrics from it for 10 minutes."
+
+  # The stable model is scraped but the canary next to it is not. The canary
+  # shares the namespace, so it must be checked on its own.
+  - interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="production", deployment="model-service-predictor"}'
+        values: '1x40'
+      - series: 'kube_deployment_status_replicas_available{namespace="production", deployment="model-service-canary-predictor"}'
+        values: '1x40'
+      - series: 'up{job="model-service", namespace="production", deployment="model-service-predictor"}'
+        values: '1x40'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: ModelMetricsMissing
+        exp_alerts:
+          - exp_labels:
+              namespace: production
+              deployment: model-service-canary-predictor
+              team: model
+              severity: warning
+            exp_annotations:
+              summary: "No model metrics from production"
+              description: "model-service-canary-predictor in production is ready, but Prometheus has had no metrics from it for 10 minutes."
 
   # A cold start has no ready pod yet, so neither missing-data alert may fire.
   - interval: 1m
     input_series:
-      - series: 'kube_deployment_status_replicas_available{namespace="staging", deployment="model-service"}'
+      - series: 'kube_deployment_status_replicas_available{namespace="staging", deployment="model-service-predictor"}'
         values: '0x40'
     alert_rule_test:
       - eval_time: 12m
@@ -90,11 +133,11 @@ tests:
   # only seen under the monitoring namespace, so it is not linked.
   - interval: 1m
     input_series:
-      - series: 'kube_deployment_status_replicas_available{namespace="staging", deployment="model-service"}'
+      - series: 'kube_deployment_status_replicas_available{namespace="staging", deployment="model-service-predictor"}'
         values: '1x40'
-      - series: 'kube_deployment_status_replicas_available{namespace="production", deployment="model-service"}'
+      - series: 'kube_deployment_status_replicas_available{namespace="production", deployment="model-service-predictor"}'
         values: '1x40'
-      - series: 'DCGM_FI_DEV_FB_USED{namespace="staging", hostname="node-a", gpu="0"}'
+      - series: 'DCGM_FI_DEV_FB_USED{namespace="staging", pod="model-service-predictor-7d9c5b6f4-abcde", hostname="node-a", gpu="0"}'
         values: '13500x40'
       - series: 'DCGM_FI_DEV_FB_USED{namespace="monitoring", hostname="node-b", gpu="0"}'
         values: '13500x40'
@@ -107,12 +150,58 @@ tests:
         exp_alerts:
           - exp_labels:
               namespace: production
-              deployment: model-service
+              deployment: model-service-predictor
               team: model
               severity: warning
             exp_annotations:
               summary: "No GPU metrics for production"
-              description: "The model pod in production is ready, but no GPU metrics are linked to it after 10 minutes."
+              description: "model-service-predictor in production is ready, but no GPU metrics are linked to it after 10 minutes."
+
+  # Both production GPUs are in use, but only the stable pod is linked in the
+  # metrics. The canary's GPU is missing.
+  - interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="production", deployment="model-service-predictor"}'
+        values: '1x40'
+      - series: 'kube_deployment_status_replicas_available{namespace="production", deployment="model-service-canary-predictor"}'
+        values: '1x40'
+      - series: 'DCGM_FI_DEV_FB_USED{namespace="production", pod="model-service-predictor-7d9c5b6f4-abcde", hostname="node-a", gpu="0"}'
+        values: '13500x40'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: GpuMetricsMissing
+        exp_alerts:
+          - exp_labels:
+              namespace: production
+              deployment: model-service-canary-predictor
+              team: model
+              severity: warning
+            exp_annotations:
+              summary: "No GPU metrics for production"
+              description: "model-service-canary-predictor in production is ready, but no GPU metrics are linked to it after 10 minutes."
+
+  # Requests queue up on the canary only. The stable model is idle.
+  - interval: 1m
+    input_series:
+      - series: 'vllm:num_requests_waiting{namespace="production", deployment="model-service-predictor"}'
+        values: '0x20'
+      - series: 'vllm:num_requests_waiting{namespace="production", deployment="model-service-canary-predictor"}'
+        values: '8x20'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: ModelRequestsQueueing
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: ModelRequestsQueueing
+        exp_alerts:
+          - exp_labels:
+              namespace: production
+              deployment: model-service-canary-predictor
+              team: model
+              severity: warning
+            exp_annotations:
+              summary: "Requests are queueing in production"
+              description: "More than 5 requests have been waiting for model-service-canary-predictor in production for 5 minutes."
 
   # Half of the chat requests in staging fail, production has no failures.
   - interval: 1m

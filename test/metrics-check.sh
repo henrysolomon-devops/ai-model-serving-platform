@@ -63,8 +63,11 @@ wait_until() {
   done
 }
 
-SUCCESS_TOTAL="sum(vllm:request_success_total{namespace=\"${ENVIRONMENT}\"}) or vector(0)"
-GPU_MEMORY="max(DCGM_FI_DEV_FB_USED{namespace=\"${ENVIRONMENT}\"})"
+# Production also runs the canary during a release. These look at the stable
+# model only: its Deployment name, and the start of its pod names.
+STABLE="model-service-predictor"
+SUCCESS_TOTAL="sum(vllm:request_success_total{namespace=\"${ENVIRONMENT}\", deployment=\"${STABLE}\"}) or vector(0)"
+GPU_MEMORY="max(DCGM_FI_DEV_FB_USED{namespace=\"${ENVIRONMENT}\", pod=~\"${STABLE}-.*\"})"
 
 # Metrics the alert rules and the dashboard use. Keep this list in step with
 # them: a renamed metric would leave panels empty and alerts quiet.
@@ -78,7 +81,7 @@ EXPECTED_METRICS=(
 MISSING=()
 
 target_is_up() {
-  [ "$(query "up{job=\"model-service\", namespace=\"${ENVIRONMENT}\"}")" = "1" ]
+  [ "$(query "up{job=\"model-service\", namespace=\"${ENVIRONMENT}\", deployment=\"${STABLE}\"}")" = "1" ]
 }
 
 requests_went_up() {
