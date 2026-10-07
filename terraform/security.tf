@@ -19,6 +19,14 @@ resource "aws_security_group" "server" {
     cidr_blocks = [var.my_ip]
   }
 
+  ingress {
+    description = "Gateway port, where the canary traffic split happens"
+    from_port   = 8003
+    to_port     = 8003
+    protocol    = "tcp"
+    cidr_blocks = [var.my_ip]
+  }
+
   # Kept separate from the chat UI ports so the model endpoint can be
   # firewalled independently later if needed.
   ingress {

@@ -1,8 +1,9 @@
 ---
-# Builds a two-node k3s cluster on the GPU instances Terraform just
+# Builds a three-node k3s cluster on the GPU instances Terraform just
 # created. The control plane hosts staging, the worker hosts production,
-# and each node's GPU is exposed to Kubernetes through the NVIDIA device
-# plugin, so vLLM can request one once it's deployed later.
+# the canary node hosts the canary during a release, and each node's GPU
+# is exposed to Kubernetes through the NVIDIA device plugin, so vLLM can
+# request one once it's deployed later.
 
 - name: Install k3s on the control plane
   hosts: control_plane
@@ -32,7 +33,7 @@
     # --tls-san: lets the API server accept connections using the
     # server's public IP. --service-node-port-range: narrows the allowed
     # NodePort range down to cover this project's ports (8001-8012).
-    # --disable traefik: not needed since KServe takes over routing later.
+    # --disable traefik: not needed, Envoy Gateway handles routing later.
     # --node-label: lets Helm pin staging to this node.
     # --default-runtime nvidia: makes containers use the NVIDIA runtime,
     # so pods that request a GPU can actually see it.
@@ -53,8 +54,8 @@
       changed_when: false
       no_log: true
 
-- name: Join the worker to the cluster
-  hosts: worker
+- name: Join the worker and the canary node to the cluster
+  hosts: worker:canary
   become: true
   gather_facts: false
 
@@ -77,9 +78,10 @@
 
     # K3S_URL is what makes the install script set this node up as a
     # worker instead of a server. It joins over the VPC's private
-    # network. --node-label lets Helm pin production to this node.
+    # network. --node-label comes from the inventory (production for the
+    # worker, canary for the canary node), so Helm can pin pods to it.
     - name: Download and run the official k3s install script as a worker
-      shell: curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="v1.36.4+k3s1" K3S_URL=https://{{ control_plane_private_ip }}:6443 K3S_TOKEN='{{ join_token }}' INSTALL_K3S_EXEC="--node-label environment=production --default-runtime nvidia" sh -
+      shell: curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="v1.36.4+k3s1" K3S_URL=https://{{ control_plane_private_ip }}:6443 K3S_TOKEN='{{ join_token }}' INSTALL_K3S_EXEC="--node-label environment={{ node_environment }} --default-runtime nvidia" sh -
       args:
         creates: /usr/local/bin/k3s
       no_log: true
@@ -96,10 +98,10 @@
   gather_facts: false
 
   tasks:
-    - name: Wait until both nodes report Ready
+    - name: Wait until all three nodes report Ready
       shell: k3s kubectl get nodes --no-headers
       register: node_status
-      until: "node_status.stdout_lines | select('search', '\\sReady\\s') | list | length == 2"
+      until: "node_status.stdout_lines | select('search', '\\sReady\\s') | list | length == 3"
       retries: 20
       delay: 10
       changed_when: false
@@ -116,10 +118,10 @@
         k3s kubectl apply -f
         https://raw.githubusercontent.com/NVIDIA/k8s-device-plugin/v0.20.0/deployments/static/nvidia-device-plugin.yml
 
-    - name: Wait for the device plugin to be ready on both nodes
+    - name: Wait for the device plugin to be ready on all three nodes
       shell: k3s kubectl get daemonset nvidia-device-plugin-daemonset -n kube-system -o jsonpath='{.status.numberReady}'
       register: plugin_ready
-      until: plugin_ready.stdout == "2"
+      until: plugin_ready.stdout == "3"
       retries: 20
       delay: 10
       changed_when: false
@@ -129,7 +131,7 @@
     - name: Confirm each node reports one GPU
       shell: k3s kubectl get nodes -o jsonpath='{.items[*].status.allocatable.nvidia\.com/gpu}'
       register: gpu_count
-      until: "gpu_count.stdout.split() == ['1', '1']"
+      until: "gpu_count.stdout.split() == ['1', '1', '1']"
       retries: 15
       delay: 10
       changed_when: false
