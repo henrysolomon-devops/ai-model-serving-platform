@@ -18,6 +18,9 @@ jobs:
   abort:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      statuses: write
     env:
       GH_TOKEN: ${{ secrets.ADMIN_PAT }}
       CANARY: helm/ai-model-serving/values-production-canary.yaml
@@ -30,7 +33,11 @@ jobs:
       - name: Close pull requests left open by the release
         run: bash scripts/canary-state.sh close-open
 
+      # The personal access token can not write commit statuses, so this
+      # step uses the job's own token.
       - name: Mark the canary results of the running image as failed
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           tag=$(sed -n 's/^    tag: "\(.*\)"$/\1/p' "$CANARY")
           if [ -z "$tag" ]; then

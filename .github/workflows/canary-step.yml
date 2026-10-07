@@ -269,7 +269,11 @@ jobs:
           bash scripts/canary-state.sh pr "bot/canary-rollback-${TAG:0:7}-$GITHUB_RUN_ID" \
             "Roll back the canary for ${TAG:0:7}"
 
+      # The personal access token above can not write commit statuses, so
+      # this step uses the job's own token.
       - name: Record the failure on the image's commit
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           gh api "repos/$GITHUB_REPOSITORY/statuses/$TAG" \
             -f state=failure \
