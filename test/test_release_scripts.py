@@ -1,4 +1,5 @@
-"""Tests for scripts/canary-plan.sh and scripts/canary-state.sh.
+"""Tests for the scripts in scripts/: canary-plan, canary-state, promote-plan
+and finish-plan.
 
 gh is replaced by a small fake script. git is real, with a bare repository
 standing in for GitHub.
@@ -13,6 +14,8 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 PLAN = ROOT / "scripts" / "canary-plan.sh"
 STATE = ROOT / "scripts" / "canary-state.sh"
+PROMOTE = ROOT / "scripts" / "promote-plan.sh"
+FINISH = ROOT / "scripts" / "finish-plan.sh"
 
 STAGING_TAG = "a" * 40
 PROD_TAG = "b" * 40
@@ -34,6 +37,12 @@ case "$1 $2" in
     ;;
   "pr view")
     echo "${FAKE_PR_STATE:-MERGED}"
+    ;;
+  "pr list")
+    cat "$FAKE_DIR/open_prs" 2> /dev/null || true
+    ;;
+  "pr close")
+    echo "closed $3" >> "$FAKE_DIR/closed.log"
     ;;
   *)
     echo "unexpected gh call: $*" >&2
@@ -321,3 +330,127 @@ def test_pr_closed_without_merge(repo):
     result = run(["bash", str(STATE), "pr", "bot/closed", "Closed"], work, env)
     assert result.returncode == 1
     assert "closed without being merged" in result.stdout
+
+
+# promote-plan.sh
+
+
+def promote(env):
+    return run(["bash", str(PROMOTE)], ROOT, env)
+
+
+def ready_to_promote(plan_env):
+    env, files, fake_dir = plan_env
+    set_canary(files["canary"], "on", 100, STAGING_TAG)
+    set_statuses(fake_dir, canary_weight_100="success")
+    return env, files, fake_dir
+
+
+def test_promote_when_the_canary_is_done(plan_env):
+    env, _, _ = ready_to_promote(plan_env)
+    result = promote(env)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == [f"tag={STAGING_TAG}", f"old={PROD_TAG}"]
+
+
+def test_promote_needs_the_100_percent_approval(plan_env):
+    env, _, fake_dir = ready_to_promote(plan_env)
+    set_statuses(fake_dir, canary_weight_50="success")
+    result = promote(env)
+    assert result.returncode == 1
+    assert "100 percent" in result.stderr
+
+
+def test_promote_refuses_a_failed_approval(plan_env):
+    env, _, fake_dir = ready_to_promote(plan_env)
+    set_statuses(fake_dir, canary_weight_100="failure")
+    assert promote(env).returncode == 1
+
+
+@pytest.mark.parametrize(
+    "mode,weight,tag",
+    [("on", 50, STAGING_TAG), ("on", 100, PROD_TAG), ("off", 0, "")],
+)
+def test_promote_needs_the_canary_live_at_100(plan_env, mode, weight, tag):
+    env, files, _ = ready_to_promote(plan_env)
+    set_canary(files["canary"], mode, weight, tag)
+    result = promote(env)
+    assert result.returncode == 1
+    assert "not at 100 percent" in result.stderr
+
+
+def test_promote_nothing_to_do(plan_env):
+    env, files, _ = ready_to_promote(plan_env)
+    files["production"].write_text(values(STAGING_TAG))
+    result = promote(env)
+    assert result.returncode == 1
+    assert "nothing to promote" in result.stderr
+
+
+def test_promote_staging_with_two_tags(plan_env):
+    env, files, _ = ready_to_promote(plan_env)
+    files["staging"].write_text(
+        f'model:\n  image:\n    tag: "{STAGING_TAG}"\nchat:\n  image:\n    tag: "{PROD_TAG}"\n'
+    )
+    assert promote(env).returncode == 1
+
+
+# finish-plan.sh
+
+
+def finish(env):
+    return run(["bash", str(FINISH)], ROOT, env)
+
+
+def test_finish_after_production_moved(plan_env):
+    env, files, _ = plan_env
+    files["production"].write_text(values(STAGING_TAG))
+    set_canary(files["canary"], "on", 100, STAGING_TAG)
+    result = finish(env)
+    assert result.returncode == 0
+    assert result.stdout.splitlines() == ["act=true", f"tag={STAGING_TAG}"]
+
+
+def test_finish_with_no_canary(plan_env):
+    env, _, _ = plan_env
+    result = finish(env)
+    assert result.returncode == 0
+    assert result.stdout.splitlines()[0] == "act=false"
+    assert "No canary" in result.stderr
+
+
+def test_finish_when_production_is_a_different_tag(plan_env):
+    env, files, _ = plan_env
+    set_canary(files["canary"], "on", 10, STAGING_TAG)
+    result = finish(env)
+    assert result.returncode == 0
+    assert result.stdout.splitlines()[0] == "act=false"
+    assert "not the end of a release" in result.stderr
+
+
+# close-open and running
+
+
+def test_close_open_closes_every_listed_pr(plan_env):
+    env, _, fake_dir = plan_env
+    (fake_dir / "open_prs").write_text("11\n12\n")
+    result = run(["bash", str(STATE), "close-open"], ROOT, env)
+    assert result.returncode == 0, result.stderr
+    assert (fake_dir / "closed.log").read_text().splitlines() == ["closed 11", "closed 12"]
+
+
+def test_close_open_with_nothing_open(plan_env):
+    env, _, fake_dir = plan_env
+    result = run(["bash", str(STATE), "close-open"], ROOT, env)
+    assert result.returncode == 0
+    assert not (fake_dir / "closed.log").exists()
+
+
+def test_running_is_true_only_for_the_live_tag(plan_env):
+    env, files, _ = plan_env
+    set_canary(files["canary"], "on", 10, STAGING_TAG)
+    assert run(["bash", str(STATE), "running", STAGING_TAG], ROOT, env).returncode == 0
+    assert run(["bash", str(STATE), "running", PROD_TAG], ROOT, env).returncode == 1
+    set_canary(files["canary"], "off", 0, "")
+    assert run(["bash", str(STATE), "running", STAGING_TAG], ROOT, env).returncode == 1
+    assert run(["bash", str(STATE), "running", ""], ROOT, env).returncode == 1

@@ -2,9 +2,13 @@
 # Edits the release state file and sends the change through a pull request.
 #   canary-state.sh write <on|off> <weight> <tag>
 #   canary-state.sh pr <branch> <title>
+#   canary-state.sh close-open
+#   canary-state.sh running <tag>
 # "pr" needs git and gh, and a GH_TOKEN that may open and merge pull requests.
 # It waits until the pull request is merged and leaves the checkout on the
-# new main. If GITHUB_OUTPUT is set, the pull request number goes there as pr.
+# new main. "close-open" closes pull requests from earlier canary runs that
+# are still open, so a half finished one can not merge later. "running"
+# succeeds only if the canary is on for that tag. If GITHUB_OUTPUT is set, the pull request number goes there as pr.
 set -euo pipefail
 
 STATE_FILE="${CANARY_VALUES:-helm/ai-model-serving/values-production-canary.yaml}"
@@ -83,6 +87,21 @@ open_pr() {
   git checkout -q -B main origin/main
 }
 
+close_open() {
+  gh pr list --state open --json number,headRefName \
+    --jq '.[] | select(.headRefName | startswith("bot/canary-")) | .number' |
+    while read -r n; do
+      gh pr close "$n" --delete-branch --comment "Closed because the release was stopped."
+    done
+}
+
+is_running() {
+  local enabled running
+  enabled=$(sed -n 's/^  enabled: \(.*\)$/\1/p' "$STATE_FILE")
+  running=$(sed -n 's/^    tag: "\(.*\)"$/\1/p' "$STATE_FILE")
+  [ "$enabled" = "true" ] && [ -n "$1" ] && [ "$running" = "$1" ]
+}
+
 case "${1:-}" in
   write)
     [ $# -eq 4 ] || { echo "Usage: $0 write <on|off> <weight> <tag>"; exit 2; }
@@ -92,9 +111,18 @@ case "${1:-}" in
     [ $# -eq 3 ] || { echo "Usage: $0 pr <branch> <title>"; exit 2; }
     open_pr "$2" "$3"
     ;;
+  close-open)
+    close_open
+    ;;
+  running)
+    [ $# -eq 2 ] || { echo "Usage: $0 running <tag>"; exit 2; }
+    is_running "$2"
+    ;;
   *)
     echo "Usage: $0 write <on|off> <weight> <tag>"
     echo "       $0 pr <branch> <title>"
+    echo "       $0 close-open"
+    echo "       $0 running <tag>"
     exit 2
     ;;
 esac

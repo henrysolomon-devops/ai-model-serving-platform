@@ -1,6 +1,6 @@
 resource "aws_security_group" "server" {
   name        = "ai-model-serving-sg"
-  description = "Security group for the GPU k3s nodes. SSH, k3s API, and app/model ports are always open for me. GitHub runners get temporary access per workflow run."
+  description = "Security group for the GPU k3s nodes. SSH, k3s API, the chat UI and the gateway are always open for me. GitHub runners get temporary access per workflow run."
   vpc_id      = aws_vpc.main.id
 
   ingress {
@@ -23,16 +23,6 @@ resource "aws_security_group" "server" {
     description = "Gateway port, where the canary traffic split happens"
     from_port   = 8003
     to_port     = 8003
-    protocol    = "tcp"
-    cidr_blocks = [var.my_ip]
-  }
-
-  # Kept separate from the chat UI ports so the model endpoint can be
-  # firewalled independently later if needed.
-  ingress {
-    description = "Model API ports (staging/production), always reachable from my own machine"
-    from_port   = 8011
-    to_port     = 8012
     protocol    = "tcp"
     cidr_blocks = [var.my_ip]
   }

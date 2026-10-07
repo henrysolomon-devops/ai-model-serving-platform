@@ -64,6 +64,12 @@ jobs:
           chart=helm/ai-model-serving
           ! helm template t "$chart" -f "$chart/values-production.yaml" --set canary.enabled=true
 
+      - name: A canary outside production must fail
+        run: |
+          chart=helm/ai-model-serving
+          ! helm template t "$chart" -f "$chart/values-staging.yaml" \
+            --set canary.enabled=true --set canary.image.tag=abc
+
       - name: A canary weight above 100 must fail
         run: |
           chart=helm/ai-model-serving
@@ -116,8 +122,14 @@ jobs:
           bash test/check-rules.sh
           python3 -m json.tool monitoring/config/dashboards/model-serving.json > /dev/null
 
+      - name: Lint the workflows
+        run: |
+          bash <(curl -sSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.7/scripts/download-actionlint.bash) 1.7.7
+          ./actionlint
+
       - name: Shellcheck
         run: |
           shellcheck model-service/entrypoint.sh ansible/deploy-k3s.sh \
             test/smoke-test.sh test/check-rules.sh test/metrics-check.sh test/canary-check.sh \
-            scripts/canary-state.sh scripts/canary-plan.sh
+            scripts/canary-state.sh scripts/canary-plan.sh \
+            scripts/promote-plan.sh scripts/finish-plan.sh

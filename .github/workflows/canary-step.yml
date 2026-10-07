@@ -42,7 +42,9 @@ jobs:
         id: plan
         env:
           GH_TOKEN: ${{ github.token }}
-        run: bash scripts/canary-plan.sh "$WEIGHT" | tee -a "$GITHUB_OUTPUT"
+        run: |
+          bash scripts/canary-plan.sh "$WEIGHT" > "$RUNNER_TEMP/plan.out"
+          tee -a "$GITHUB_OUTPUT" < "$RUNNER_TEMP/plan.out"
 
   shift:
     needs: plan
@@ -136,7 +138,7 @@ jobs:
           kubectl -n argocd annotate application model-production \
             argocd.argoproj.io/refresh=hard --overwrite
           route() {
-            kubectl get httproute model-service -n production \
+            kubectl get httproute model-traffic -n production \
               -o jsonpath='{.spec.rules[0].backendRefs[?(@.name=="model-service-canary-predictor")].weight}'
           }
           deadline=$((SECONDS + 600))
@@ -204,13 +206,24 @@ jobs:
     needs: [plan, approve]
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       statuses: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      # If the release was aborted while the approval was waiting, the
+      # canary is off by now and an approval must not be recorded.
       - name: Record the approval on the image's commit
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.plan.outputs.tag }}
         run: |
+          if ! bash scripts/canary-state.sh running "$TAG"; then
+            echo "::warning::The canary is no longer running ${TAG:0:7}, so the approval was not recorded."
+            exit 0
+          fi
           gh api "repos/$GITHUB_REPOSITORY/statuses/$TAG" \
             -f state=success \
             -f context="canary-weight-${WEIGHT}" \
@@ -221,13 +234,15 @@ jobs:
     needs: [plan, shift, approve]
     if: >-
       always() && needs.plan.result == 'success' &&
-      (needs.shift.result == 'failure' || needs.approve.result == 'failure')
+      (needs.shift.result == 'failure' || needs.shift.result == 'cancelled' ||
+       needs.approve.result == 'failure' || needs.approve.result == 'cancelled')
     runs-on: ubuntu-latest
     permissions:
       contents: read
       statuses: write
     env:
       TAG: ${{ needs.plan.outputs.tag }}
+      WAKE: ${{ needs.plan.outputs.wake }}
       GH_TOKEN: ${{ secrets.ADMIN_PAT }}
     steps:
       - uses: actions/checkout@v4
@@ -236,10 +251,21 @@ jobs:
           token: ${{ secrets.ADMIN_PAT }}
 
       # Weight 0 sends everything back to the stable model. Argo CD syncs
-      # it within a few minutes, so this is quick but not instant.
+      # it within a few minutes, so this is quick but not instant. If this
+      # run was the one that started the canary, switch it off completely
+      # so it does not hold a GPU for nothing.
+      # A run that was cancelled halfway may have left its own pull request
+      # open with auto-merge on. Close it so it can not merge later.
+      - name: Close pull requests left open by this release
+        run: bash scripts/canary-state.sh close-open
+
       - name: Send all traffic back to the stable model
         run: |
-          bash scripts/canary-state.sh write on 0 "$TAG"
+          if [ "$WAKE" = "true" ]; then
+            bash scripts/canary-state.sh write off 0 ""
+          else
+            bash scripts/canary-state.sh write on 0 "$TAG"
+          fi
           bash scripts/canary-state.sh pr "bot/canary-rollback-${TAG:0:7}-$GITHUB_RUN_ID" \
             "Roll back the canary for ${TAG:0:7}"
 

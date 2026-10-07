@@ -1,0 +1,61 @@
+name: Promote to production
+
+# Opens a PR that moves production to the image that just passed the canary
+# at 100 percent. Merging that PR by hand is what deploys it.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: read
+
+concurrency:
+  group: promote
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.ADMIN_PAT }}
+      PRODUCTION: helm/ai-model-serving/values-production.yaml
+    steps:
+      # A PAT, not GITHUB_TOKEN, so the PR it opens can trigger CI.
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.ADMIN_PAT }}
+
+      - name: Check that the canary run is complete
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          bash scripts/promote-plan.sh > "$RUNNER_TEMP/plan.out"
+          tee -a "$GITHUB_OUTPUT" < "$RUNNER_TEMP/plan.out"
+
+      - name: Close older promote PRs that are still open
+        run: |
+          gh pr list --state open --json number,headRefName \
+            --jq '.[] | select(.headRefName | startswith("bot/promote-")) | .number' |
+          while read -r n; do
+            gh pr close "$n" --delete-branch --comment "Superseded by a newer promote"
+          done
+
+      # No auto-merge on purpose: production is merged by hand.
+      - name: Open the promote PR
+        env:
+          NEW: ${{ steps.plan.outputs.tag }}
+          OLD: ${{ steps.plan.outputs.old }}
+        run: |
+          sed -i -E "s/^(    tag: ).*/\1\"$NEW\"/" "$PRODUCTION"
+          git --no-pager diff
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          branch="bot/promote-${NEW:0:7}"
+          git checkout -b "$branch"
+          git commit -am "Promote ${NEW:0:7} to production"
+          git push origin "$branch"
+          gh pr create --base main --head "$branch" \
+            --title "Promote ${NEW:0:7} to production" \
+            --body "Moves production from ${OLD:0:7} to ${NEW:0:7}. The canary already serves all traffic on this image. Merging this updates the stable model, then the release finishes on its own."

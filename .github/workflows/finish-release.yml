@@ -1,0 +1,120 @@
+name: Finish release
+
+# Runs after the promote PR is merged. Once the stable model runs the new
+# image, it switches the canary off and sends all traffic back to stable.
+# If the infrastructure was down at merge time, run it by hand after the
+# next apply.
+on:
+  push:
+    branches: [main]
+    paths:
+      - helm/ai-model-serving/values-production.yaml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: canary
+  cancel-in-progress: false
+
+env:
+  ROLE_ARN: arn:aws:iam::578254188866:role/github-actions-ai-model-serving-role
+
+jobs:
+  finish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 90
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      GH_TOKEN: ${{ secrets.ADMIN_PAT }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.ADMIN_PAT }}
+
+      - name: Check that a release is waiting to finish
+        id: plan
+        run: |
+          bash scripts/finish-plan.sh > "$RUNNER_TEMP/plan.out"
+          tee -a "$GITHUB_OUTPUT" < "$RUNNER_TEMP/plan.out"
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        if: steps.plan.outputs.act == 'true'
+        with:
+          role-to-assume: ${{ env.ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Find the security group
+        id: infra
+        if: steps.plan.outputs.act == 'true'
+        run: |
+          sg=$(aws ec2 describe-security-groups \
+            --filters Name=group-name,Values=ai-model-serving-sg \
+            --query 'SecurityGroups[0].GroupId' --output text)
+          if [ "$sg" = "None" ]; then
+            echo "::error::Infrastructure is down. Run the Infrastructure workflow with apply, then run this workflow again."
+            exit 1
+          fi
+          echo "sg=$sg" >> "$GITHUB_OUTPUT"
+
+      - name: Let this runner reach the k3s API
+        id: access
+        if: steps.plan.outputs.act == 'true'
+        env:
+          SG: ${{ steps.infra.outputs.sg }}
+        run: |
+          cidr="$(curl -s ifconfig.me)/32"
+          echo "cidr=$cidr" >> "$GITHUB_OUTPUT"
+          aws ec2 authorize-security-group-ingress \
+            --group-id "$SG" --protocol tcp --port 6443 --cidr "$cidr"
+
+      # The stable model restarts on the new image while the canary keeps
+      # serving. Only when it is ready is it safe to hand traffic back.
+      - name: Wait for the stable model on the new image
+        if: steps.plan.outputs.act == 'true'
+        env:
+          KUBECONFIG_B64: ${{ secrets.KUBECONFIG_B64 }}
+          TAG: ${{ steps.plan.outputs.tag }}
+        run: |
+          mkdir -p ~/.kube
+          echo "$KUBECONFIG_B64" | base64 -d > ~/.kube/config
+          kubectl -n argocd annotate application model-production \
+            argocd.argoproj.io/refresh=hard --overwrite
+          # One line per stable pod: its image and whether it is ready.
+          pods() {
+            kubectl get pods -n production -l serving.kserve.io/inferenceservice=model-service \
+              -o jsonpath='{range .items[*]}{.spec.containers[0].image}{" "}{.status.containerStatuses[0].ready}{"\n"}{end}'
+          }
+          deadline=$((SECONDS + 2400))
+          until [ "$(pods | sed 's/.*://')" = "$TAG true" ]; do
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::The stable model never got a ready pod on ${TAG:0:7}."
+              exit 1
+            fi
+            sleep 20
+          done
+          kubectl rollout status deployment/chat-ui -n production --timeout=5m
+
+      - name: Switch the canary off
+        if: steps.plan.outputs.act == 'true'
+        env:
+          TAG: ${{ steps.plan.outputs.tag }}
+        run: |
+          bash scripts/canary-state.sh write off 0 ""
+          bash scripts/canary-state.sh pr "bot/canary-finish-${TAG:0:7}-$GITHUB_RUN_ID" \
+            "Finish the release of ${TAG:0:7}"
+
+      - name: Close the temporary access
+        if: always() && steps.access.outcome == 'success'
+        env:
+          SG: ${{ steps.infra.outputs.sg }}
+          CIDR: ${{ steps.access.outputs.cidr }}
+        run: |
+          aws ec2 revoke-security-group-ingress \
+            --group-id "$SG" --protocol tcp --port 6443 --cidr "$CIDR" || true

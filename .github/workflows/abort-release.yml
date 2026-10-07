@@ -1,0 +1,52 @@
+name: Abort release
+
+# The way out of a release that should not go on: the canary was started
+# for an image that is no longer the one on staging, or the checks keep
+# failing and nobody wants to continue. It sends all traffic back to the
+# stable model, switches the canary off and marks the canary results of
+# that image as failed, so the image starts again from weight 10.
+#
+# If a Canary step run is waiting for approval, reject it first. This
+# workflow does not wait in line behind it, since that is when it is needed.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  abort:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.ADMIN_PAT }}
+      CANARY: helm/ai-model-serving/values-production-canary.yaml
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.ADMIN_PAT }}
+
+      - name: Close pull requests left open by the release
+        run: bash scripts/canary-state.sh close-open
+
+      - name: Mark the canary results of the running image as failed
+        run: |
+          tag=$(sed -n 's/^    tag: "\(.*\)"$/\1/p' "$CANARY")
+          if [ -z "$tag" ]; then
+            echo "No canary image is set, nothing to mark."
+            exit 0
+          fi
+          for weight in 10 50 100; do
+            gh api "repos/$GITHUB_REPOSITORY/statuses/$tag" \
+              -f state=failure \
+              -f context="canary-weight-${weight}" \
+              -f description="The release was aborted" \
+              -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          done
+
+      - name: Switch the canary off
+        run: |
+          bash scripts/canary-state.sh write off 0 ""
+          bash scripts/canary-state.sh pr "bot/canary-abort-$GITHUB_RUN_ID" \
+            "Abort the release and switch the canary off"

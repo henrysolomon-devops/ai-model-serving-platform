@@ -2,7 +2,7 @@ name: Staging smoke test
 
 # Runs after the bot moves staging to a new image. Also runnable by hand
 # once the infrastructure is back up. The result is recorded on the
-# image's commit, which is what promote.yml checks.
+# image's commit, which the canary workflows check.
 on:
   push:
     branches: [main]

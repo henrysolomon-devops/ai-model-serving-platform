@@ -90,10 +90,12 @@ jobs:
         if: inputs.action == 'apply'
         id: ips
         run: |
-          echo "control_plane=$(terraform output -raw control_plane_public_ip)" >> "$GITHUB_OUTPUT"
-          echo "worker=$(terraform output -raw worker_public_ip)" >> "$GITHUB_OUTPUT"
-          echo "canary=$(terraform output -raw canary_public_ip)" >> "$GITHUB_OUTPUT"
-          echo "control_plane_private=$(terraform output -raw control_plane_private_ip)" >> "$GITHUB_OUTPUT"
+          {
+            echo "control_plane=$(terraform output -raw control_plane_public_ip)"
+            echo "worker=$(terraform output -raw worker_public_ip)"
+            echo "canary=$(terraform output -raw canary_public_ip)"
+            echo "control_plane_private=$(terraform output -raw control_plane_private_ip)"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Look up the security group this run needs to touch
         if: inputs.action == 'apply'
@@ -123,9 +125,11 @@ jobs:
 
       - name: Write out the SSH private key so Ansible can use it
         if: inputs.action == 'apply'
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/ai-model-serving-key
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/ai-model-serving-key
           chmod 600 ~/.ssh/ai-model-serving-key
 
       - name: Run the Ansible playbook to build the cluster and expose the GPUs
