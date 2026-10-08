@@ -26,7 +26,7 @@ KServe calls its plain Deployment mode Standard mode in recent releases. Older d
 
 ```mermaid
 flowchart LR
-    git["GitHub repo, main"] -->|"Argo CD syncs 11 apps"| argo["Argo CD"]
+    git["GitHub repo, main"] -->|"syncs 11 apps"| argo["Argo CD"]
 
     subgraph cp["Control plane node, 1 T4"]
         stgmodel["model, staging"]
@@ -43,13 +43,13 @@ flowchart LR
     end
 
     chat["chat-ui, production"] --> gw["Envoy Gateway"]
-    gw -->|"weight 100 minus N"| stable
-    gw -->|"weight N"| canary
+    gw -->|"100 minus N"| stable
+    gw -->|"N"| canary
 
-    mon -->|"scrapes both"| stable
-    mon -->|"scrapes both"| canary
-    check["canary-step.yml and canary_check.py"] -->|"sends test requests, asks Prometheus"| mon
-    check -->|"opens a PR that sets the weight"| git
+    mon -->|"scrape"| stable
+    mon -->|"scrape"| canary
+    check["canary-step.yml"] -->|"test requests, queries"| mon
+    check -->|"PR sets weight"| git
 ```
 
 Production is now two InferenceServices, `model-service` and `model-service-canary`. They use the same chart and the same model, on different images and different nodes. The chat UI talks to one address, and a single HTTPRoute called `model-traffic` decides how many requests go to each.
@@ -92,14 +92,19 @@ Order is enforced with commit statuses on the image's commit: `canary-weight-10`
 4. **Promote.** `Promote to production` opens a pull request that moves the stable model to the new image. Merging it by hand is the only way production changes.
 5. **Finish.** `finish-release.yml` starts when that pull request merges. It waits until the stable model is ready on the new image and only then switches the canary off, so traffic never lands on a model that is still starting.
 
+**Canary step at 10 percent, with the check table**
 ![Canary step at 10 percent, with the check table](images/v4-canary-step-summary.png)
 
+**Canary step at 50 percent, waiting for approval**
 ![Canary step at 50 percent, waiting for approval](images/v4-canary-approval.png)
 
+**Canary step at 100 percent**
 ![Canary step at 100 percent](images/v4-canary-100-summary.png)
 
+**The promotion pull request**
 ![The promotion pull request](images/v4-promote-pr.png)
 
+**The finish release job**
 ![The finish release job](images/v4-finish-release-steps.png)
 
 ### The canary check
@@ -137,12 +142,15 @@ Everything ran on AWS: three `g4dn.xlarge` spot instances with Llama-3.2-3B-Inst
 
 The first image went all the way through: 10, 50 and 100 percent, the promotion pull request, and `finish-release`, with no downtime and the canary removed at the end. The direct requests to each model by host name worked through the gateway, and the traffic split matched the weight in every check.
 
+**Argo CD with all 11 applications healthy**
 ![Argo CD with all 11 applications healthy](images/v4-argocd-apps-healthy.png)
 
+**The production app in Argo CD, with the canary next to stable**
 ![The production app in Argo CD, with the canary next to stable](images/v4-argocd-model-production-canary.png)
 
 The Grafana dashboard from v3 shows both models side by side, each on its own GPU:
 
+**Canary and stable in Grafana**
 ![Canary and stable in Grafana](images/v4-grafana-canary-vs-stable.png)
 
 | Chat UI, staging | Chat UI, production |
@@ -153,18 +161,22 @@ The Grafana dashboard from v3 shows both models side by side, each on its own GP
 
 I used a second image to test the ways out. I rejected the approval at 10 percent, and the rollback ran: the weight went back to 0, the canary was removed, and `canary-weight-10` was recorded as failed.
 
+**A rejected approval, with the rollback job green**
 ![A rejected approval, with the rollback job green](images/v4-canary-rollback.png)
 
 Then I ran the canary again, approved it, and ran `Abort release`. It finished in under two minutes, and afterwards the statuses on the image's commit were `staging-smoke-test` success and all three canary statuses failure, which is what a restart from 10 percent needs. The canary pod disappeared a few minutes later, once Argo CD had synced the change.
 
+**Abort release**
 ![Abort release](images/v4-abort-release.png)
 
 ### Alerts that fired for real
 
 The disk pressure problem below triggered real alerts, and they reached Slack without any help. `ChatUiErrors` is the one from v3.
 
+**Infra alerts in Slack**
 ![Infra alerts in Slack](images/v4-slack-alerts-infra.png)
 
+**Model alerts in Slack**
 ![Model alerts in Slack](images/v4-slack-alerts-model.png)
 
 ### Numbers
